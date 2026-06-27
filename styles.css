@@ -569,7 +569,16 @@
 	display: inline-flex;
 }
 .ghost-updater-public-url {
+	display: flex;
+	align-items: center;
+	gap: 4px;
 	margin-bottom: 12px;
 	font-size: var(--font-ui-small);
 	word-break: break-all;
+}
+.ghost-updater-public-url a {
+	flex: 1;
+}
+.ghost-updater-copy {
+	flex: 0 0 auto;
 }

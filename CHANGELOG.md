@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-06-27
+
+### Added
+- **Copy button** next to the public URL in the properties modal.
+- After **Save & sync**, the modal stays open and **refreshes in place** — the published status and live public URL appear without reopening.
+
+### Changed
+- On first publish, identifiers (`ghost_id`, editor URL, public URL) are written back **immediately** instead of after a 3-second delay. Safe now that re-syncs read `ghost_id` from disk; also closes the brief create-then-resync duplicate window.
+
 ## [0.4.2] - 2026-06-27
 
 ### Added

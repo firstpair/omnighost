@@ -687,8 +687,29 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			await this.app.vault.modify(file, updated);
 			new Notice('Ghost properties saved');
 			if (doSync) {
-				await this.syncEngine.syncFileToGhost(file);
+				try {
+					await this.syncEngine.syncFileToGhost(file);
+				} catch (e) {
+					new Notice(`Sync failed: ${(e as Error).message}`);
+				}
 			}
+
+			// Re-read the note to report the up-to-date status + public URL back to
+			// the modal (the sync writes g_public_url / g_published back on success).
+			const freshContent = await this.app.vault.read(file);
+			let freshFm: Record<string, unknown> = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
+			const freshSplit = splitFrontmatter(freshContent);
+			if (freshSplit) {
+				try {
+					const d = parseYaml(freshSplit.raw) as unknown;
+					if (d && typeof d === 'object') freshFm = d as Record<string, unknown>;
+				} catch { /* ignore */ }
+			}
+			const fmd = parseGhostMetadata(freshFm, prefix);
+			const freshStatus: GhostPropsForm['status'] = !fmd?.published
+				? 'draft'
+				: (fmd.published_at ? 'schedule' : 'publish');
+			return { savedStatus: freshStatus, publicUrl: fmd?.public_url ?? '' };
 		}).open();
 	}
 

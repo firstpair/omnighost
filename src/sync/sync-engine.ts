@@ -325,28 +325,23 @@ export class SyncEngine {
 				}
 				console.debug(`[Ghost Sync] Created: ${title}`, ghostPost);
 
-				// IMPORTANT: Don't trigger another sync by modifying the file immediately
-				// Wait a bit to avoid the debounced sync from being called again
+				// Write the identifiers back immediately. A re-sync now reads
+				// `ghost_id` from disk and updates in place, so this no longer needs a
+				// delay to avoid a duplicate — and it makes the public URL available
+				// right after publishing (e.g. for the properties modal).
 				const capturedGhostPost = ghostPost;
-				activeWindow.setTimeout(() => {
-					// Update file with Ghost ID, slug, editor URL and (for a
-					// published/scheduled post) the public URL below the editor URL.
-					const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
-					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
-					const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
-					let updatedContent = updateFrontmatterWithGhostId(
-						content,
-						capturedGhostPost.id,
-						capturedGhostPost.slug,
-						this.settings.yamlPrefix
-					);
-					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-					void this.app.vault.modify(file, updatedContent).then(() => {
-						console.debug('[Ghost Sync] Frontmatter updated with Ghost ID and editor URL');
-					}).catch((err: Error) => {
-						console.error('[Ghost Sync] Failed to update frontmatter:', err);
-					});
-				}, 3000); // Wait 3 seconds (longer than debounce timeout)
+				const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
+				const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
+				const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
+				let updatedContent = updateFrontmatterWithGhostId(
+					content,
+					capturedGhostPost.id,
+					capturedGhostPost.slug,
+					this.settings.yamlPrefix
+				);
+				updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+				await this.app.vault.modify(file, updatedContent);
+				console.debug('[Ghost Sync] Frontmatter updated with Ghost ID, editor URL, public URL');
 			}
 
 			// Update last sync time

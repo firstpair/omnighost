@@ -1,4 +1,4 @@
-import { App, Modal, Setting, setIcon } from 'obsidian';
+import { App, Modal, Notice, Setting, setIcon } from 'obsidian';
 
 /** Read-only context shown at the top of the modal (not editable). */
 export interface GhostPropsInfo {
@@ -28,15 +28,16 @@ export class EditGhostPropertiesModal extends Modal {
 	private title: string;
 	private form: GhostPropsForm;
 	private info: GhostPropsInfo;
-	private onSubmit: (form: GhostPropsForm, doSync: boolean) => void | Promise<void>;
+	private onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>;
 	private dateSetting?: Setting;
+	private statusContainer?: HTMLElement;
 
 	constructor(
 		app: App,
 		title: string,
 		initial: GhostPropsForm,
 		info: GhostPropsInfo,
-		onSubmit: (form: GhostPropsForm, doSync: boolean) => void | Promise<void>
+		onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>
 	) {
 		super(app);
 		this.title = title;
@@ -50,28 +51,11 @@ export class EditGhostPropertiesModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl('h3', { text: `Ghost properties — ${this.title}` });
 
-		// Status indicator + public URL (reflects the post's last-synced state)
-		const statusRow = contentEl.createDiv({ cls: 'ghost-updater-status' });
-		const iconEl = statusRow.createSpan({ cls: 'ghost-updater-status-icon' });
-		if (this.info.savedStatus === 'publish') {
-			setIcon(iconEl, 'check-circle');
-			statusRow.addClass('is-published');
-			statusRow.createSpan({ text: 'Published' });
-		} else if (this.info.savedStatus === 'schedule') {
-			setIcon(iconEl, 'clock');
-			statusRow.createSpan({ text: 'Scheduled' });
-		} else {
-			setIcon(iconEl, 'circle');
-			statusRow.createSpan({ text: 'Draft' });
-		}
-
-		if (this.info.publicUrl) {
-			const urlRow = contentEl.createDiv({ cls: 'ghost-updater-public-url' });
-			urlRow.createSpan({ text: 'Public URL: ' });
-			const link = urlRow.createEl('a', { text: this.info.publicUrl, href: this.info.publicUrl });
-			link.setAttr('target', '_blank');
-			link.setAttr('rel', 'noopener');
-		}
+		// Status indicator + public URL (reflects the post's last-synced state).
+		// Re-rendered in place after "Save & sync" so the live URL appears here
+		// without having to reopen the modal.
+		this.statusContainer = contentEl.createDiv();
+		this.renderStatus();
 
 		new Setting(contentEl)
 			.setName('Status')
@@ -131,11 +115,46 @@ export class EditGhostPropertiesModal extends Modal {
 			.addText(t => t.setValue(this.form.featureImage).onChange(v => this.form.featureImage = v));
 
 		new Setting(contentEl)
-			.addButton(b => b.setButtonText('Cancel').onClick(() => this.close()))
+			.addButton(b => b.setButtonText('Close').onClick(() => this.close()))
 			.addButton(b => b.setButtonText('Save').onClick(() => void this.submit(false)))
 			.addButton(b => b.setButtonText('Save & sync').setCta().onClick(() => void this.submit(true)));
 
 		this.updateDateVisibility();
+	}
+
+	/** Render (or re-render) the status indicator and public URL row. */
+	private renderStatus(): void {
+		const c = this.statusContainer;
+		if (!c) return;
+		c.empty();
+
+		const statusRow = c.createDiv({ cls: 'ghost-updater-status' });
+		const iconEl = statusRow.createSpan({ cls: 'ghost-updater-status-icon' });
+		if (this.info.savedStatus === 'publish') {
+			setIcon(iconEl, 'check-circle');
+			statusRow.addClass('is-published');
+			statusRow.createSpan({ text: 'Published' });
+		} else if (this.info.savedStatus === 'schedule') {
+			setIcon(iconEl, 'clock');
+			statusRow.createSpan({ text: 'Scheduled' });
+		} else {
+			setIcon(iconEl, 'circle');
+			statusRow.createSpan({ text: 'Draft' });
+		}
+
+		if (this.info.publicUrl) {
+			const urlRow = c.createDiv({ cls: 'ghost-updater-public-url' });
+			urlRow.createSpan({ text: 'Public URL: ' });
+			const link = urlRow.createEl('a', { text: this.info.publicUrl, href: this.info.publicUrl });
+			link.setAttr('target', '_blank');
+			link.setAttr('rel', 'noopener');
+			const copyBtn = urlRow.createEl('button', { cls: 'clickable-icon ghost-updater-copy' });
+			setIcon(copyBtn, 'copy');
+			copyBtn.setAttr('aria-label', 'Copy public URL');
+			copyBtn.addEventListener('click', () => {
+				void navigator.clipboard.writeText(this.info.publicUrl).then(() => new Notice('Copied public URL'));
+			});
+		}
 	}
 
 	/** Show the publish-date row only when scheduling. */
@@ -144,8 +163,14 @@ export class EditGhostPropertiesModal extends Modal {
 	}
 
 	private async submit(doSync: boolean): Promise<void> {
-		this.close();
-		await this.onSubmit(this.form, doSync);
+		const updated = await this.onSubmit(this.form, doSync);
+		if (doSync) {
+			// Keep the modal open and refresh the status/URL so the live link appears.
+			if (updated) this.info = updated;
+			this.renderStatus();
+		} else {
+			this.close();
+		}
 	}
 
 	onClose(): void {

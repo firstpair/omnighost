@@ -1,6 +1,6 @@
 {
 	"name": "ghost-updater",
-	"version": "0.4.2",
+	"version": "0.4.3",
 	"description": "Publish and update Ghost CMS posts from Obsidian on desktop and iOS — image upload, in-place updates, scheduling and YAML metadata control.",
 	"author": "Alexy Khrabrov",
 	"main": "main.js",
