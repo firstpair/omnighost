@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-27
+
+### Fixed
+- **Frontmatter changes now take effect on sync.** All Ghost metadata (not just `ghost_id`/slug) is read from the file on disk, so toggling `published`, changing `post_access`, etc. in the Properties UI applies on the next sync without having to edit the body to "wake up" the metadata cache.
+- **`post_access` is now case- and whitespace-insensitive.** Typing `Public` (or `PUBLIC`, ` public `) no longer silently falls back to `paid`.
+
 ## [0.3.3] - 2026-06-27
 
 ### Fixed

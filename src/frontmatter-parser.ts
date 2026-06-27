@@ -124,8 +124,9 @@ export function parseGhostMetadata(
 		return null;
 	}
 
-	// Parse post_access (visibility)
-	const rawPostAccess = get('post_access');
+	// Parse post_access (visibility) — accept any case / surrounding whitespace
+	const rawPostAccessVal = get('post_access');
+	const rawPostAccess = typeof rawPostAccessVal === 'string' ? rawPostAccessVal.trim().toLowerCase() : '';
 	let post_access: GhostPostAccess = 'paid'; // Default: paid-members only
 	if (rawPostAccess === 'public' || rawPostAccess === 'members' || rawPostAccess === 'paid') {
 		post_access = rawPostAccess as GhostPostAccess;

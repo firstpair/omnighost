@@ -106,40 +106,37 @@ export class SyncEngine {
 				return false;
 			}
 
-			// Extract Ghost metadata
-			const metadata = parseGhostMetadata(cache.frontmatter, this.settings.yamlPrefix);
-			if (!metadata) {
-				// Silently skip files without Ghost properties (not an error)
-				return false;
-			}
-
-			// Resolve the post id and slug from the file ON DISK as the source of
-			// truth. Obsidian's metadata cache can lag right after the note is edited
-			// or the plugin reloads; trusting it alone can miss an existing ghost_id
-			// and create a DUPLICATE instead of updating. We also tolerate the id
-			// being stored under `ghost_id` / `g_id` regardless of the configured
-			// prefix, then fall back to the cache-derived values.
-			let resolvedGhostId = metadata.ghost_id;
-			let explicitSlug = metadata.slug;
+			// Parse Ghost metadata from the file ON DISK as the source of truth.
+			// Obsidian's metadata cache lags right after a frontmatter edit (e.g.
+			// toggling `published` or changing `post_access` in the Properties UI),
+			// so reading from the cache can sync stale values — or miss an existing
+			// `ghost_id` and create a duplicate. Fall back to the cache if needed.
+			let frontmatterObj: Record<string, unknown> = (cache.frontmatter ?? {}) as Record<string, unknown>;
 			const fmParsed = splitFrontmatter(content);
 			if (fmParsed) {
 				try {
-					const fm = parseYaml(fmParsed.raw) as Record<string, unknown> | null;
-					if (fm) {
-						const idVal = fm[`${this.settings.yamlPrefix}id`] ?? fm['ghost_id'] ?? fm['g_id'];
-						if (typeof idVal === 'string' || typeof idVal === 'number') resolvedGhostId = String(idVal);
-						const slugVal = fm[`${this.settings.yamlPrefix}slug`] ?? fm['ghost_slug'] ?? fm['g_slug'];
-						if (typeof slugVal === 'string' || typeof slugVal === 'number') explicitSlug = String(slugVal);
+					const diskFm = parseYaml(fmParsed.raw) as unknown;
+					if (diskFm && typeof diskFm === 'object') {
+						frontmatterObj = diskFm as Record<string, unknown>;
 					}
 				} catch (e) {
-					console.debug('[Ghost Sync] Could not parse frontmatter from disk:', e);
+					console.debug('[Ghost Sync] Disk frontmatter parse failed; using cache:', e);
 				}
+			}
+
+			const metadata = parseGhostMetadata(frontmatterObj, this.settings.yamlPrefix);
+			if (!metadata) {
+				// Silently skip files without Ghost properties (not an error)
+				return false;
 			}
 
 			// Check if sync is disabled
 			if (metadata.no_sync) {
 				return false;
 			}
+
+			const resolvedGhostId = metadata.ghost_id;
+			const explicitSlug = metadata.slug;
 
 			// Log that we're starting sync
 			console.debug(`[Ghost Sync] Starting sync for ${file.path}`);
