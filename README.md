@@ -39,6 +39,17 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 
 > **iOS note.** The `.obsidian` folder is hidden in the Files app; the easiest path is to install/enable any community plugin once so the `plugins/` folder exists, then drop `ghost-updater/` in beside it. Your vault must be in a Files-accessible location (On My iPhone or iCloud Drive).
 
+### Via BRAT (beta, auto-updating)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs and auto-updates plugins straight from GitHub — works on desktop and mobile:
+
+1. Install **Obsidian42 - BRAT** from Community plugins and enable it.
+2. Run the command **"BRAT: Add a beta plugin for testing"**.
+3. Enter the repo: **`alexy/ghost-updater`** and confirm.
+4. Enable **Ghost Updater** under Community plugins.
+
+BRAT will keep it updated as new releases are published.
+
 ### From source (development)
 
 1. Clone the repository:

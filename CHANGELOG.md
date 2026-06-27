@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.1] - 2026-06-27
+## [0.3.2] - 2026-06-27
+
+### Added
+- README: "Via BRAT" install instructions for auto-updating beta installs.
+
+### Fixed
+- Lint/type cleanups for community-plugin submission: typed the image-reference rewrite callbacks, sentence-cased UI strings, and excluded build output from linting.
 
 ### Added
 - **Seed a note from an existing Ghost post by slug.** When a note has an explicit `g_slug` but no `ghost_id`, you can pull the live post into the note (Ghost → Obsidian) to bootstrap it: metadata and body are written into the note and `ghost_id` is recorded, so later edits push in place.

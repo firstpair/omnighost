@@ -154,14 +154,14 @@ export async function processPostImages(
 	}
 
 	// Rewrite remaining references to the uploaded Ghost URLs.
-	out = out.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g, (full, alt, src) => {
+	out = out.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g, (full: string, alt: string, src: string) => {
 		const target = decodeURIComponent(src);
 		const url = isRemote(target) ? null : urlByTarget.get(target);
 		return url ? `![${alt}](${url})` : full;
 	});
 	// Convert Obsidian embeds to standard markdown images (the Lexical converter only understands `![](...)`).
-	out = out.replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g, (full, target, alt) => {
-		const url = urlByTarget.get(String(target).trim());
+	out = out.replace(/!\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g, (full: string, target: string, alt: string) => {
+		const url = urlByTarget.get(target.trim());
 		return url ? `![${(alt || '').trim()}](${url})` : full;
 	});
 

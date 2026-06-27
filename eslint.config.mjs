@@ -32,7 +32,7 @@ const configs = resolvedBase.map((config) => {
 });
 
 export default [
-	{ ignores: [".claude/", "node_modules/", "main.js", "*.mjs", "package.json"] },
+	{ ignores: [".claude/", "node_modules/", "**/main.js", "dist-ios/", "release/", "*.mjs", "package.json"] },
 	...configs,
 	// Add browser/Obsidian globals and override rules for TS files
 	{

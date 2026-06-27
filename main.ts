@@ -168,7 +168,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		// Seed the current note from an existing Ghost post matched by g_slug
 		this.addCommand({
 			id: 'seed-note-from-ghost-by-slug',
-			name: 'Seed note from existing Ghost post (by slug)',
+			name: 'Seed note from existing ghost post (by slug)',
 			editorCallback: (_editor, view) => {
 				if (!view.file) { new Notice('No active file'); return; }
 				void this.seedActiveNoteFromGhost(view.file);
@@ -585,7 +585,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			return;
 		}
 		if (metadata.ghost_id) {
-			new Notice('This note already has a ghost_id — nothing to seed.');
+			new Notice('This note is already linked to a ghost post; nothing to seed.');
 			return;
 		}
 
