@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-27
+
+### Fixed
+- **Duplicate posts on update.** The create/update decision read `ghost_id` from Obsidian's metadata cache, which can lag right after a note is edited or the plugin reloads — causing a note that already has a `ghost_id` to be **created as a duplicate** (often a new draft) instead of updated. The id and slug are now read from the file on disk (via `parseYaml`) as the source of truth, and the id is also recognized under `ghost_id` / `g_id` regardless of the configured prefix.
+
 ## [0.3.2] - 2026-06-27
 
 ### Added

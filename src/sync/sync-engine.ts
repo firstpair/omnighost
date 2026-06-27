@@ -1,4 +1,4 @@
-import { App, TFile, Notice } from 'obsidian';
+import { App, TFile, Notice, parseYaml } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
 import { GhostWriterSettings, GhostPost } from '../types';
 import { parseGhostMetadata, extractContent, updateFrontmatterWithGhostId, updateFrontmatterWithGhostUrl, upsertGhostMetadata, splitFrontmatter, joinFrontmatter } from '../frontmatter-parser';
@@ -113,6 +113,29 @@ export class SyncEngine {
 				return false;
 			}
 
+			// Resolve the post id and slug from the file ON DISK as the source of
+			// truth. Obsidian's metadata cache can lag right after the note is edited
+			// or the plugin reloads; trusting it alone can miss an existing ghost_id
+			// and create a DUPLICATE instead of updating. We also tolerate the id
+			// being stored under `ghost_id` / `g_id` regardless of the configured
+			// prefix, then fall back to the cache-derived values.
+			let resolvedGhostId = metadata.ghost_id;
+			let explicitSlug = metadata.slug;
+			const fmParsed = splitFrontmatter(content);
+			if (fmParsed) {
+				try {
+					const fm = parseYaml(fmParsed.raw) as Record<string, unknown> | null;
+					if (fm) {
+						const idVal = fm[`${this.settings.yamlPrefix}id`] ?? fm['ghost_id'] ?? fm['g_id'];
+						if (typeof idVal === 'string' || typeof idVal === 'number') resolvedGhostId = String(idVal);
+						const slugVal = fm[`${this.settings.yamlPrefix}slug`] ?? fm['ghost_slug'] ?? fm['g_slug'];
+						if (typeof slugVal === 'string' || typeof slugVal === 'number') explicitSlug = String(slugVal);
+					}
+				} catch (e) {
+					console.debug('[Ghost Sync] Could not parse frontmatter from disk:', e);
+				}
+			}
+
 			// Check if sync is disabled
 			if (metadata.no_sync) {
 				return false;
@@ -128,9 +151,9 @@ export class SyncEngine {
 			// Auto-seed: if g_slug is set, there is no ghost_id yet, and the note has
 			// no body, pull the existing Ghost post INTO the note (Ghost → Obsidian)
 			// instead of pushing an empty note over the live post.
-			if (metadata.slug && !metadata.ghost_id && rawMarkdown.trim() === '') {
+			if (explicitSlug && !resolvedGhostId && rawMarkdown.trim() === '') {
 				console.debug('[Ghost Sync] Empty note with explicit slug — seeding from Ghost instead of publishing');
-				const seeded = await this.seedNoteFromGhostBySlug(file, metadata.slug);
+				const seeded = await this.seedNoteFromGhostBySlug(file, explicitSlug);
 				this.onStatusChange?.(seeded ? 'success' : 'idle', seeded ? 'Seeded from Ghost' : undefined);
 				return seeded;
 			}
@@ -257,12 +280,12 @@ export class SyncEngine {
 			// (g_slug). Auto-derived (title-based) slugs are never used for adoption,
 			// so a new note whose title happens to collide with an existing post can
 			// never silently overwrite it.
-			let targetId = metadata.ghost_id;
-			if (!targetId && metadata.slug) {
-				const existing = await this.ghostClient.getPostBySlug(metadata.slug);
+			let targetId = resolvedGhostId;
+			if (!targetId && explicitSlug) {
+				const existing = await this.ghostClient.getPostBySlug(explicitSlug);
 				if (existing) {
 					targetId = existing.id;
-					console.debug(`[Ghost Sync] Existing post with explicit slug '${metadata.slug}' found (${targetId}); updating instead of creating`);
+					console.debug(`[Ghost Sync] Existing post with explicit slug '${explicitSlug}' found (${targetId}); updating instead of creating`);
 				}
 			}
 
@@ -280,7 +303,7 @@ export class SyncEngine {
 				// slug (no ghost_id yet) record the id; for a published or scheduled
 				// post, also record its public URL just below the editor URL.
 				const publicUrl = (status === 'published' || status === 'scheduled') ? (ghostPost.url || undefined) : undefined;
-				const needsId = !metadata.ghost_id;
+				const needsId = !resolvedGhostId;
 				const needsUrl = !metadata.ghost_url;
 				const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
 				if (needsId || needsUrl || needsPublic) {
