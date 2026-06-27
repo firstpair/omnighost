@@ -7,7 +7,7 @@ export function generateGhostFrontmatter(settings: GhostWriterSettings): string 
 	const prefix = settings.yamlPrefix;
 
 	return `---
-${prefix}post_access: paid
+${prefix}post_access: public
 ${prefix}published: false
 ${prefix}published_at: ""
 ${prefix}featured: false
@@ -171,7 +171,7 @@ export function addGhostPropertiesToContent(content: string, settings: GhostWrit
 		// Build only the missing properties
 		const propsToAdd: string[] = [];
 		const defaults: Record<string, string> = {
-			'post_access': 'paid',
+			'post_access': 'public',
 			'published': 'false',
 			'published_at': '""',
 			'featured': 'false',
@@ -193,7 +193,7 @@ ${propsToAdd.join('\n')}
 ${parsed.body}`;
 	} else {
 		// Create new frontmatter with all properties
-		const ghostProperties = `${prefix}post_access: paid
+		const ghostProperties = `${prefix}post_access: public
 ${prefix}published: false
 ${prefix}published_at: ""
 ${prefix}featured: false

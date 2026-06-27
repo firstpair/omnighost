@@ -5,6 +5,7 @@ node_modules
 main.js
 *.js.map
 release/
+dist-ios/
 
 # obsidian
 data.json

@@ -1,10 +1,10 @@
 {
-	"id": "ghost-writer-manager",
-	"name": "Ghost Writer Manager",
-	"version": "0.2.15",
+	"id": "ghost-updater",
+	"name": "Ghost Updater",
+	"version": "0.3.0",
 	"minAppVersion": "1.11.4",
-	"description": "Sync notes to Ghost CMS with post scheduling, YAML metadata control, and periodic sync.",
-	"author": "Diego Eis",
-	"authorUrl": "https://github.com/diegoeis",
+	"description": "Publish and update Ghost CMS posts from Obsidian on desktop and iOS — uploads images, updates posts in place instead of duplicating, with scheduling and YAML metadata control.",
+	"author": "Alexy Khrabrov",
+	"authorUrl": "https://github.com/alexy",
 	"isDesktopOnly": false
 }

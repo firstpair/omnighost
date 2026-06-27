@@ -12,6 +12,8 @@ export interface GhostWriterSettings {
 	showSyncNotifications: boolean;
 	schedulingIntervalDays: number; // days between scheduled publications
 	defaultPublishTime: string; // HH:MM (UTC) for scheduled posts
+	/** Cache of uploaded image content-hash → Ghost URL, so images aren't re-uploaded. */
+	imageCache: Record<string, string>;
 }
 
 /**
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: GhostWriterSettings = {
 	showSyncNotifications: true,
 	schedulingIntervalDays: 7,
 	defaultPublishTime: '09:00',
+	imageCache: {},
 };
 
 /**
@@ -58,4 +61,5 @@ export interface GhostPost {
 	published_at: string | null;
 	updated_at: string;
 	created_at: string;
+	url?: string; // public URL of the post (returned by the Ghost Admin API)
 }

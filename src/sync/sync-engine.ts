@@ -4,6 +4,7 @@ import { GhostWriterSettings, GhostPost } from '../types';
 import { parseGhostMetadata, extractContent, updateFrontmatterWithGhostId, updateFrontmatterWithGhostUrl } from '../frontmatter-parser';
 import { extractTitle, generateSlug, normalizePaywallMarker } from '../converters/markdown-to-html';
 import { markdownToLexical } from '../converters/markdown-to-lexical';
+import { processPostImages } from '../ghost/image-uploader';
 
 /**
  * Sync Engine - Handles synchronization from Obsidian to Ghost
@@ -12,12 +13,14 @@ export class SyncEngine {
 	private app: App;
 	private settings: GhostWriterSettings;
 	private ghostClient: GhostAPIClient;
+	private saveSettings?: () => Promise<void>;
 	public onStatusChange?: (status: 'idle' | 'syncing' | 'success' | 'error', message?: string) => void;
 
-	constructor(app: App, settings: GhostWriterSettings, ghostClient: GhostAPIClient) {
+	constructor(app: App, settings: GhostWriterSettings, ghostClient: GhostAPIClient, saveSettings?: () => Promise<void>) {
 		this.app = app;
 		this.settings = settings;
 		this.ghostClient = ghostClient;
+		this.saveSettings = saveSettings;
 	}
 
 	/**
@@ -60,9 +63,25 @@ export class SyncEngine {
 
 			// Extract markdown content (without frontmatter)
 			const rawMarkdown = extractContent(content);
-			const markdownContent = normalizePaywallMarker(rawMarkdown);
+			const baseMarkdown = normalizePaywallMarker(rawMarkdown);
+
+			// Upload local images to Ghost and rewrite their references to the
+			// uploaded URLs. When the note has no explicit feature image, the first
+			// image is promoted to the cover and removed from the body (cover swallow).
+			const hasExplicitFeature = !!(metadata.feature_image && metadata.feature_image.trim());
+			const { markdown: markdownContent, coverImageUrl, cacheUpdated } = await processPostImages(
+				this.app,
+				this.ghostClient,
+				baseMarkdown,
+				file,
+				!hasExplicitFeature,
+				this.settings.imageCache
+			);
+			if (cacheUpdated) {
+				await this.saveSettings?.();
+			}
 			console.debug('[Ghost Sync] Markdown content length:', markdownContent.length);
-			console.debug('[Ghost Sync] Markdown preview:', markdownContent.substring(0, 200));
+			console.debug('[Ghost Sync] Cover image (swallowed):', coverImageUrl);
 
 			// Convert to Lexical format (Ghost's editor format)
 			const lexical = markdownToLexical(markdownContent);
@@ -141,7 +160,7 @@ export class SyncEngine {
 
 			// Add optional fields — send null to explicitly clear values in Ghost
 			postData.excerpt = metadata.excerpt || null;
-			postData.feature_image = metadata.feature_image || null;
+			postData.feature_image = metadata.feature_image || coverImageUrl || null;
 			if (metadata.tags.length > 0) {
 				postData.tags = metadata.tags.map(name => ({ name }));
 			}
@@ -160,29 +179,48 @@ export class SyncEngine {
 				slug
 			});
 
-			// Check if this is an update or create
+			// Resolve the target post. `ghost_id` is the stable updater once a post
+			// has been published from this note. As a fallback, adopt an existing
+			// post by slug — but ONLY when the slug is set explicitly via frontmatter
+			// (g_slug). Auto-derived (title-based) slugs are never used for adoption,
+			// so a new note whose title happens to collide with an existing post can
+			// never silently overwrite it.
+			let targetId = metadata.ghost_id;
+			if (!targetId && metadata.slug) {
+				const existing = await this.ghostClient.getPostBySlug(metadata.slug);
+				if (existing) {
+					targetId = existing.id;
+					console.debug(`[Ghost Sync] Existing post with explicit slug '${metadata.slug}' found (${targetId}); updating instead of creating`);
+				}
+			}
+
 			let ghostPost: GhostPost;
-			if (metadata.ghost_id) {
-				// Update existing post
-				console.debug(`[Ghost Sync] Updating post ${metadata.ghost_id}`);
-				ghostPost = await this.ghostClient.updatePost(metadata.ghost_id, postData);
+			if (targetId) {
+				// Update existing post (matched by ghost_id or adopted via slug)
+				console.debug(`[Ghost Sync] Updating post ${targetId}`);
+				ghostPost = await this.ghostClient.updatePost(targetId, postData);
 				if (this.settings.showSyncNotifications) {
 					new Notice(`Updated in ghost: ${title}`);
 				}
 				console.debug(`[Ghost Sync] Updated: ${title}`);
-				console.debug('[Ghost Sync] Ghost returned post:', {
-					id: ghostPost.id,
-					title: ghostPost.title,
-					htmlLength: ghostPost.html?.length || 0,
-					lexicalLength: ghostPost.lexical?.length || 0
-				});
 
-				if (!metadata.ghost_url) {
+				// Persist identifiers back to frontmatter. After adopting a post by
+				// slug (no ghost_id yet) record the id; for a published or scheduled
+				// post, also record its public URL just below the editor URL.
+				const publicUrl = (status === 'published' || status === 'scheduled') ? (ghostPost.url || undefined) : undefined;
+				const needsId = !metadata.ghost_id;
+				const needsUrl = !metadata.ghost_url;
+				const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
+				if (needsId || needsUrl || needsPublic) {
 					const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
-					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${metadata.ghost_id}`;
-					const updatedContent = updateFrontmatterWithGhostUrl(content, ghostEditorUrl, this.settings.yamlPrefix);
+					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
+					let updatedContent = content;
+					if (needsId) {
+						updatedContent = updateFrontmatterWithGhostId(updatedContent, ghostPost.id, ghostPost.slug, this.settings.yamlPrefix);
+					}
+					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
 					await this.app.vault.modify(file, updatedContent);
-					console.debug('[Ghost Sync] Frontmatter updated with Ghost editor URL');
+					console.debug('[Ghost Sync] Frontmatter updated with Ghost id/url/public_url');
 				}
 			} else {
 				// Create new post
@@ -197,16 +235,18 @@ export class SyncEngine {
 				// Wait a bit to avoid the debounced sync from being called again
 				const capturedGhostPost = ghostPost;
 				activeWindow.setTimeout(() => {
-					// Update file with Ghost ID, slug and editor URL
+					// Update file with Ghost ID, slug, editor URL and (for a
+					// published/scheduled post) the public URL below the editor URL.
 					const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
 					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
+					const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
 					let updatedContent = updateFrontmatterWithGhostId(
 						content,
 						capturedGhostPost.id,
 						capturedGhostPost.slug,
 						this.settings.yamlPrefix
 					);
-					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix);
+					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
 					void this.app.vault.modify(file, updatedContent).then(() => {
 						console.debug('[Ghost Sync] Frontmatter updated with Ghost ID and editor URL');
 					}).catch((err: Error) => {

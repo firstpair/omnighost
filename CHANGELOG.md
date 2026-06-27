@@ -1,11 +1,49 @@
 # Changelog
 
-All notable changes to the Ghost Writer Manager plugin will be documented in this file.
+All notable changes to the Ghost Updater plugin will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.3.0] - 2026-06-27
+
+Renamed to **Ghost Updater** — a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT), focused on publishing and reliably updating Ghost posts from Obsidian on desktop and iOS.
+
+### Added
+- **Public URL in frontmatter**: for a published or scheduled post, the post's public URL is written as `g_public_url`, just below the editor URL (`g_url`), on create and on update.
+- **Image publishing**: local images (`![alt](path)` and Obsidian `![[embed]]`) are uploaded to Ghost's Images API and references are rewritten to the hosted URLs.
+- **Cover-image trick**: when a note has no `g_feature_image`, the first image becomes the post cover and is removed from the body so it isn't shown twice.
+- **Content-hash image cache**: uploaded images are cached by SHA-256 of their bytes, so unchanged images are not re-uploaded across syncs.
+- **Update-by-slug adoption**: when a note has no `ghost_id` but sets an explicit `g_slug`, an existing Ghost post with that slug is updated in place instead of creating a duplicate (auto-derived slugs never adopt, to avoid accidental overwrites).
+
+### Changed
+- New posts default to `g_post_access: public` (was `paid`), so notes publish publicly unless changed.
+- Plugin id is now `ghost-updater` (install folder `.obsidian/plugins/ghost-updater/`).
+
+## [0.2.19] - 2026-06-27
+
+### Changed
+- Update-by-slug now only adopts a post when `g_slug` is set explicitly; `ghost_id` remains the primary, collision-proof updater.
+
+## [0.2.18] - 2026-06-27
+
+### Added
+- Persistent content-hash cache of uploaded images to avoid re-uploading unchanged images.
+
+## [0.2.17] - 2026-06-27
+
+### Added
+- Image upload to Ghost with reference rewriting and the cover-image trick.
+- Upsert by slug so re-publishing updates the existing post rather than creating a duplicate.
+
+## [0.2.16] - 2026-06-26
+
+### Fixed
+- iOS/mobile compatibility: replaced Node `Buffer` base64 with the WebView-safe `btoa` in JWT signing (signing already used Web Crypto).
+- More tolerant Ghost auth: trim whitespace/newlines from the pasted Admin API key, and backdate the JWT `iat` to absorb device/server clock skew (addresses "Invalid token").
+- Removed the unused Node-only `@tryghost/admin-api` dependency.
 
 ## [0.2.1] - 2026-02-19
 

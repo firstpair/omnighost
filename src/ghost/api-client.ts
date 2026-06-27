@@ -33,7 +33,13 @@ export class GhostAPIClient {
 			throw new Error('Admin API key not configured');
 		}
 
-		const [id, secret] = this.apiKey.split(':');
+		// Trim whitespace/newlines accidentally pasted with the key (a very common
+		// cause of Ghost "Invalid token"), and split on the FIRST colon only so a
+		// stray colon can't corrupt the secret.
+		const trimmedKey = this.apiKey.trim();
+		const sep = trimmedKey.indexOf(':');
+		const id = sep === -1 ? '' : trimmedKey.slice(0, sep).trim();
+		const secret = sep === -1 ? '' : trimmedKey.slice(sep + 1).trim();
 
 		if (!id || !secret) {
 			throw new Error('Invalid Admin API key format. Expected format: id:secret');
@@ -53,9 +59,12 @@ export class GhostAPIClient {
 		};
 
 		// Payload
+		// Backdate iat by 10s to tolerate clock skew between the device and the
+		// Ghost server (a phone in airplane mode can drift); keep the 5-min expiry.
+		const nowSec = Math.floor(Date.now() / 1000);
 		const payload = {
-			iat: Math.floor(Date.now() / 1000),
-			exp: Math.floor(Date.now() / 1000) + (5 * 60), // 5 minutes
+			iat: nowSec - 10,
+			exp: nowSec + (5 * 60), // 5 minutes
 			aud: '/admin/'
 		};
 
@@ -84,8 +93,20 @@ export class GhostAPIClient {
 	 * Base64 URL encode
 	 */
 	private base64UrlEncode(str: string): string {
-		const base64 = Buffer.from(str, 'utf8').toString('base64');
-		return base64
+		return this.base64UrlFromBytes(new TextEncoder().encode(str));
+	}
+
+	/**
+	 * Base64URL-encode raw bytes using the WebView-safe `btoa` global.
+	 * Node's `Buffer` is unavailable on Obsidian mobile (iOS/Android), so we
+	 * build a binary string from the bytes and encode with the standard `btoa`.
+	 */
+	private base64UrlFromBytes(bytes: Uint8Array): string {
+		let binary = '';
+		for (let i = 0; i < bytes.length; i++) {
+			binary += String.fromCharCode(bytes[i]);
+		}
+		return btoa(binary)
 			.replace(/\+/g, '-')
 			.replace(/\//g, '_')
 			.replace(/=/g, '');
@@ -124,12 +145,8 @@ export class GhostAPIClient {
 		// Sign
 		const signature = await crypto.subtle.sign('HMAC', key, messageData);
 
-		// Convert to base64url
-		const base64 = Buffer.from(signature).toString('base64');
-		return base64
-			.replace(/\+/g, '-')
-			.replace(/\//g, '_')
-			.replace(/=/g, '');
+		// Convert to base64url (Buffer-free for mobile/iOS compatibility)
+		return this.base64UrlFromBytes(new Uint8Array(signature));
 	}
 
 	/**
@@ -161,6 +178,71 @@ export class GhostAPIClient {
 		}
 
 		return await requestUrl(options);
+	}
+
+	/**
+	 * Upload an image to Ghost's Images API and return its public URL.
+	 *
+	 * The multipart/form-data body is built by hand as a byte array so this works
+	 * in the Obsidian mobile WebView (iOS/Android): no Node `Buffer`, no `FormData`.
+	 */
+	async uploadImage(data: ArrayBuffer, filename: string, mimeType: string): Promise<string> {
+		const token = await this.generateToken();
+		const url = `${this.apiUrl}/ghost/api/admin/images/upload/`;
+		const boundary = `----GhostWriterManager${Math.random().toString(16).slice(2)}`;
+
+		const encoder = new TextEncoder();
+		const head = encoder.encode(
+			`--${boundary}\r\n` +
+			`Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
+			`Content-Type: ${mimeType}\r\n\r\n`
+		);
+		const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
+		const image = new Uint8Array(data);
+
+		const body = new Uint8Array(head.length + image.length + tail.length);
+		body.set(head, 0);
+		body.set(image, head.length);
+		body.set(tail, head.length + image.length);
+
+		const response = await requestUrl({
+			url,
+			method: 'POST',
+			headers: {
+				'Authorization': `Ghost ${token}`,
+				'Content-Type': `multipart/form-data; boundary=${boundary}`,
+				'Accept-Version': 'v5.0'
+			},
+			body: body.buffer,
+			throw: false
+		});
+
+		if (response.status !== 201 && response.status !== 200) {
+			throw new Error(`Image upload failed: ${response.status} ${response.text}`);
+		}
+
+		const uploaded = (response.json as { images?: { url: string }[] })?.images?.[0]?.url;
+		if (!uploaded) {
+			throw new Error(`Image upload returned no URL: ${response.text}`);
+		}
+		return uploaded;
+	}
+
+	/**
+	 * Look up a post by its slug. Returns null when no post has that slug.
+	 * Used to update an existing post instead of creating a duplicate.
+	 */
+	async getPostBySlug(slug: string): Promise<GhostPost | null> {
+		const endpoint = `/posts/slug/${encodeURIComponent(slug)}/?formats=html,lexical&include=tags`;
+		const response = await this.makeRequest(endpoint);
+		if (response.status === 404) {
+			return null;
+		}
+		if (response.status !== 200) {
+			throw new Error(`Failed to look up post by slug: ${response.status} ${response.text}`);
+		}
+		const data = response.json as { posts: GhostPost[] };
+		return data.posts?.[0] ?? null;
 	}
 
 	/**

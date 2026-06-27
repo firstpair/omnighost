@@ -37,7 +37,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		);
 
 		// Initialize sync engine
-		this.syncEngine = new SyncEngine(this.app, this.settings, this.ghostClient);
+		this.syncEngine = new SyncEngine(this.app, this.settings, this.ghostClient, () => this.saveSettings());
 
 		// Connect sync engine to status bar
 		this.syncEngine.onStatusChange = (status, message) => {

@@ -15,6 +15,7 @@ export interface GhostMetadata {
 	ghost_id?: string; // Ghost post ID if already synced
 	slug?: string; // Custom slug
 	ghost_url?: string; // Ghost editor URL for this post
+	public_url?: string; // public URL of the published post
 }
 
 /**
@@ -180,7 +181,8 @@ export function parseGhostMetadata(
 		no_sync,
 		ghost_id: get('id') ? String(get('id')) : undefined,
 		slug: get('slug') ? String(get('slug')) : undefined,
-		ghost_url: get('url') ? String(get('url')) : undefined
+		ghost_url: get('url') ? String(get('url')) : undefined,
+		public_url: get('public_url') ? String(get('public_url')) : undefined
 	};
 }
 
@@ -200,11 +202,17 @@ export function extractContent(fileContent: string): string {
 export function updateFrontmatterWithGhostUrl(
 	fileContent: string,
 	ghostUrl: string,
-	prefix: string
+	prefix: string,
+	publicUrl?: string
 ): string {
-	return upsertFrontmatterKeys(fileContent, {
+	const updates: Record<string, string> = {
 		[`${prefix}url`]: ghostUrl
-	});
+	};
+	// For published/scheduled posts, record the public URL just below the editor URL.
+	if (publicUrl) {
+		updates[`${prefix}public_url`] = publicUrl;
+	}
+	return upsertFrontmatterKeys(fileContent, updates);
 }
 
 /**

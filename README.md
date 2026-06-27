@@ -1,125 +1,107 @@
-# Ghost Writer Manager
+# Ghost Updater
 
-One-way synchronization from Obsidian to Ghost CMS with post scheduling, YAML metadata control, automatic sync, and an editorial calendar view.
+Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** — with image upload, in-place updates (no duplicates), post scheduling, YAML metadata control, automatic sync, and an editorial calendar view.
+
+> **Fork notice.** Ghost Updater is a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT). On top of the original it adds: full **iOS / mobile** compatibility, **image publishing** to Ghost with a cover-image trick, a **content-hash image cache** (so images aren't re-uploaded), and **`ghost_id` / explicit-`g_slug` upsert** so re-publishing updates the existing post instead of creating a duplicate. See the [CHANGELOG](CHANGELOG.md) for details.
 
 ## Features
 
 - 🔄 **One-way sync** from Obsidian to Ghost (keeps Ghost as your publishing platform)
-- 📅 **Editorial calendar** - Sidebar view of all scheduled and published posts for the month
-- 📝 **YAML frontmatter control** - Manage all Ghost metadata directly in Obsidian
-- 🕐 **Post scheduling** - Schedule posts for future publication with `g_published_at`
-- 🔄 **Automatic sync** - Debounced sync on file save (2s delay)
-- ⏰ **Periodic sync** - Configurable interval sync (default: 15 minutes)
-- ✨ **Markdown to Lexical conversion** - Full markdown support including images
-- 🔒 **Paywall marker** - Control the public preview line with `--members-only--`
-- 🔐 **Secure credentials** - API keys stored in Obsidian's secure keychain
-- 🔑 **JWT authentication** - Secure Ghost Admin API integration
-- 📊 **Status bar indicator** - Visual feedback on sync status
-- 🎯 **Flexible configuration** - Custom sync folder, prefix, and intervals
+- ♻️ **In-place updates, no duplicates** — re-publishing updates the same post via `ghost_id`; optional adoption of an existing post by explicit `g_slug`
+- 🖼️ **Image publishing** — local images (`![](…)` and `![[…]]` embeds) are uploaded to Ghost and references rewritten to the hosted URLs
+- 🎚️ **Cover-image trick** — when no `g_feature_image` is set, the first image becomes the post cover and is removed from the body (no duplicate at the top)
+- ⚡ **Content-hash image cache** — unchanged images are never re-uploaded across syncs
+- 📱 **Desktop and iOS** — works in the Obsidian mobile WebView (no Node `Buffer`/`FormData`; JWT signing via Web Crypto, multipart built by hand)
+- 📅 **Editorial calendar** — sidebar view of all scheduled and published posts for the month
+- 📝 **YAML frontmatter control** — manage all Ghost metadata directly in Obsidian
+- 🕐 **Post scheduling** — schedule posts for future publication with `g_published_at`
+- 🔄 **Automatic sync** — debounced sync on file save
+- ⏰ **Periodic sync** — configurable interval sync (default: 15 minutes)
+- ✨ **Markdown to Lexical conversion** — full markdown support including images
+- 🔒 **Paywall marker** — control the public preview line with `--members-only--`
+- 🔐 **Secure credentials** — API keys stored in Obsidian's secure keychain
+- 🔑 **JWT authentication** — Ghost Admin API integration (whitespace-tolerant key parsing + clock-skew tolerance)
+- 📊 **Status bar indicator** — visual feedback on sync status
 
 ## Installation
 
-### From GitHub Releases (Recommended)
+### Manual install (desktop or iOS)
 
-1. Go to the [Releases page](https://github.com/diegoeis/ghost-writer-manager-plugin/releases)
-2. Download the latest release files:
+1. Download the latest release files from the [Releases page](https://github.com/alexy/ghost-updater/releases):
    - `main.js`
    - `manifest.json`
    - `styles.css`
-3. In your vault, navigate to `.obsidian/plugins/` folder
-4. Create a new folder called `ghost-writer-manager`
-5. Move the downloaded files into `.obsidian/plugins/ghost-writer-manager/`
-6. Restart Obsidian or reload the app
-7. Go to **Settings** → **Community Plugins**
-8. Enable **Ghost Writer Manager**
+2. In your vault, navigate to the `.obsidian/plugins/` folder.
+3. Create a folder called **`ghost-updater`**.
+4. Move the downloaded files into `.obsidian/plugins/ghost-updater/`.
+5. Restart Obsidian (or reload the app).
+6. Go to **Settings → Community plugins** and enable **Ghost Updater**.
 
-### From Source (For Development)
+> **iOS note.** The `.obsidian` folder is hidden in the Files app; the easiest path is to install/enable any community plugin once so the `plugins/` folder exists, then drop `ghost-updater/` in beside it. Your vault must be in a Files-accessible location (On My iPhone or iCloud Drive).
 
-1. Clone this repository:
+### From source (development)
+
+1. Clone the repository:
    ```bash
-   git clone https://github.com/diegoeis/ghost-writer-manager-plugin.git
-   cd ghost-writer-manager-plugin
+   git clone https://github.com/alexy/ghost-updater.git
+   cd ghost-updater
    ```
-
 2. Install dependencies:
    ```bash
    npm install
    ```
-
 3. Configure your vault path for hot reload:
    ```bash
    cp dev.config.example.json dev.config.json
    # Edit dev.config.json with your vault path
    ```
-
 4. Start dev mode with hot reload:
    ```bash
    npm run dev
    ```
-   This will automatically:
-   - Watch for file changes
-   - Build on every change
-   - Copy `main.js`, `manifest.json`, and `styles.css` to your vault
-   - No manual copying needed!
-
-5. Enable the plugin in Obsidian settings
-
-6. Reload Obsidian (Ctrl/Cmd + R) to see changes
+5. Enable the plugin in Obsidian settings and reload (Ctrl/Cmd + R) to see changes.
 
 ## Configuration
 
-### Getting Your Ghost Admin API Key
+### Getting your Ghost Admin API key
 
-1. Log in to your Ghost Admin panel
-2. Navigate to **Settings** → **Integrations**
-3. Click **Add custom integration**
-4. Give it a name (e.g., "Obsidian Sync")
-5. Copy the **Admin API Key** (format: `id:secret`)
+1. Log in to your Ghost Admin panel.
+2. Navigate to **Settings → Integrations**.
+3. Click **Add custom integration** and give it a name (e.g., "Obsidian").
+4. Copy the **Admin API Key** (format: `id:secret`).
 
-### Plugin Settings
+> Use the **Admin API Key** (which contains a `:`), not the Content API Key. Surrounding whitespace is tolerated, but the key must be the admin key.
 
-1. Open Obsidian Settings
-2. Navigate to **Ghost Writer Manager** under Community Plugins
-3. Configure the following:
-   - **Ghost URL**: Your Ghost site URL (e.g., `https://yourblog.ghost.io`)
-   - **Admin API Key**: The key you copied from Ghost (stored securely in Obsidian's keychain)
-   - **Sync Folder**: Where Ghost posts will be stored in your vault (default: `Ghost Posts`)
-   - **Sync Interval**: How often to check for changes in minutes (default: 15)
-   - **YAML Prefix**: Prefix for Ghost metadata fields (default: `g_`)
+### Plugin settings
 
-4. Click **Test Connection** to verify your credentials
-
-> **Note**: Your Admin API Key is stored securely using Obsidian's keychain and is not saved in plain text.
+1. Open Obsidian Settings → **Ghost Updater** under Community plugins.
+2. Configure:
+   - **Ghost URL** — your Ghost site URL (e.g., `https://yourblog.ghost.io`), no trailing slash
+   - **Admin API Key** — stored securely in Obsidian's keychain
+   - **Sync Folder** — where Ghost posts live in your vault (default: `Ghost Posts`)
+   - **Sync Interval** — minutes between checks (default: 15)
+   - **YAML Prefix** — prefix for Ghost metadata fields (default: `g_`)
+3. Click **Test Connection** to verify your credentials.
 
 ## Usage
 
-### Editorial Calendar
+### Updating vs. creating (no duplicates)
 
-Open the editorial calendar from the ribbon icon or via `Cmd/Ctrl + P` → "Open Ghost editorial calendar". The sidebar shows all published and scheduled posts for the current month:
+- The **first** publish creates the post and writes its `ghost_id` (and editor URL) back into the note's frontmatter. Every later publish updates **that** post by `ghost_id`.
+- To adopt a post that already exists on Ghost (e.g., created elsewhere) without making a duplicate, set its slug explicitly with **`g_slug`** — Ghost Updater will find that post by slug and update it in place, then record its `ghost_id`.
+- Notes with only an auto-derived (title-based) slug always **create** — so a title collision can never silently overwrite an unrelated post.
 
-- **Purple dot** — post is published
-- **Green dot** — post is scheduled
-- **Both dots** — day has both published and scheduled posts
-- Click a day to filter the post list to that day; click again to show all
-- Click a post title to open the linked vault note in a new tab
-- Click the external link icon to open the post directly in Ghost Admin
-- Use the **Today** button to return to the current month
+### Images
 
-### Commands
+- Local images referenced as `![alt](path)` or Obsidian embeds `![[image.png]]` are uploaded to Ghost's Images API on publish, and the reference is rewritten to the hosted URL.
+- **Cover trick:** if the note has no `g_feature_image`, the **first** image becomes the post's feature image and is removed from the body (so it isn't shown twice). Set `g_feature_image` to keep every image inline.
+- Images are cached by content hash, so unchanged images are never re-uploaded. Remote `http(s)`/`data:` images are left untouched.
 
-Available commands (Cmd/Ctrl + P):
+### Editorial calendar
 
-- **Sync with Ghost** - Manually sync all files in sync folder
-- **Test Ghost connection** - Verify your Ghost credentials
-- **Open Ghost editorial calendar** - Open the calendar sidebar view
-- **Create new Ghost post** - Generate new post with Ghost properties template
-- **Add Ghost properties to current note** - Add Ghost properties to existing note
-- **Sync current note to Ghost** - Force sync of active file
-- **Debug commands** - Show properties, test JWT, view file data
+Open it from the ribbon icon or `Cmd/Ctrl + P` → "Open Ghost editorial calendar". The sidebar shows published (purple dot) and scheduled (green dot) posts for the month; click a day to filter, a title to open the linked note, or the external-link icon to open the post in Ghost Admin.
 
-### YAML Frontmatter
-
-Control all Ghost post metadata using YAML frontmatter:
+### YAML frontmatter
 
 ```yaml
 ---
@@ -129,8 +111,8 @@ g_published_at: ""               # Schedule: ISO date (e.g., "2026-12-25T10:00:0
 g_featured: false                # Mark as featured post
 g_tags: [obsidian, ghost]        # Post tags
 g_excerpt: "Post summary"        # Custom excerpt/description
-g_feature_image: ""              # Featured image URL
-g_slug: "custom-url"             # Custom URL slug
+g_feature_image: ""              # Cover image URL (leave empty to use the first body image)
+g_slug: "custom-url"             # Custom URL slug (also enables update-by-slug adoption)
 g_no_sync: false                 # Disable sync for this post
 ---
 
@@ -141,117 +123,45 @@ Your post content here...
 
 ### Paywall marker
 
-Control where the public preview ends for members-only posts. Add `--members-only--` on its own line anywhere in the post body:
+Add `--members-only--` on its own line to mark where the public preview ends for members-only posts. Everything above is the public preview; everything below is behind the Ghost paywall. Works with `g_post_access: paid` or `members`.
 
-```markdown
-# My Post
+### Post scheduling
 
-This paragraph is visible to everyone.
-
---members-only--
-
-This content is only visible to paying members.
-```
-
-- The marker is rendered as a styled banner in the Obsidian editor (uses your theme's accent color)
-- Everything above the marker is the public preview; everything below is behind the Ghost paywall
-- Only one marker is allowed — if you add a second one, the first is removed automatically
-- Works together with `g_post_access: paid` or `g_post_access: members`
-
-### Post Scheduling
-
-Control when posts are published:
-
-- **Draft**: `g_published: false` (ignores `g_published_at`)
+- **Draft**: `g_published: false`
 - **Publish now**: `g_published: true` + `g_published_at: ""`
-- **Schedule**: `g_published: true` + `g_published_at: "2026-12-25T10:00:00.000Z"` (future date)
-- **Backdate**: `g_published: true` + `g_published_at: "2020-01-01T10:00:00.000Z"` (past date)
+- **Schedule**: `g_published: true` + `g_published_at: "<future ISO date>"`
+- **Backdate**: `g_published: true` + `g_published_at: "<past ISO date>"`
 
 ## Development
 
-### Project Structure
-
 ```
-ghost-writer-manager-plugin/
-├── main.ts                 # Main plugin file
+ghost-updater/
+├── main.ts                       # Main plugin file
 ├── src/
-│   ├── types.ts           # TypeScript interfaces
+│   ├── types.ts                  # TypeScript interfaces (+ image cache)
 │   ├── ghost/
-│   │   └── api-client.ts  # Ghost Admin API client
+│   │   ├── api-client.ts         # Ghost Admin API client (JWT, CRUD, image upload, slug lookup)
+│   │   └── image-uploader.ts     # Image upload, reference rewriting, cover swallow, hash cache
+│   ├── sync/
+│   │   └── sync-engine.ts        # Obsidian → Ghost sync, upsert
+│   ├── converters/               # Markdown ↔ Lexical/HTML
 │   └── views/
-│       └── calendar-view.ts  # Editorial calendar sidebar
-├── styles.css             # Plugin styles
-├── manifest.json          # Plugin manifest
-├── package.json           # Dependencies
-└── tsconfig.json          # TypeScript config
+│       └── calendar-view.ts      # Editorial calendar sidebar
+├── styles.css
+├── manifest.json
+└── package.json
 ```
 
-### Commands
+- `npm run dev` — build in watch mode
+- `npm run build` — production build (type-check + bundle)
+- `npm run lint` — ESLint
 
-- `npm run dev` - Build in development mode with watch
-- `npm run build` - Build for production
-- `npm run lint` - Run ESLint
+## Credits & License
 
-### Development Mode
+Ghost Updater is a fork of **[Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin)** by **Diego Eis**. Original work © 2026 Diego Eis. Fork maintained by Alexy Khrabrov.
 
-The plugin includes a `DEV_MODE` flag in `main.ts` that enables auto-sync on file changes:
-
-```typescript
-const DEV_MODE = true; // Set to false for production builds
-```
-
-**When `DEV_MODE = true`:**
-- Files auto-sync 2 seconds after last change (debounced)
-- Useful for testing during development
-
-**When `DEV_MODE = false` (production):**
-- Files only sync according to the configured interval
-- Manual sync still available via commands
-
-**Important:** Always set `DEV_MODE = false` before building for production/release.
-
-## Roadmap
-
-### ✅ Completed (v0.1.0)
-- [x] Ghost API authentication (JWT with HMAC-SHA256)
-- [x] Settings interface
-- [x] Connection testing
-- [x] One-way sync engine (Obsidian → Ghost)
-- [x] YAML metadata control (full Ghost properties support)
-- [x] Markdown to Lexical format conversion
-- [x] Periodic sync (configurable interval)
-- [x] Post scheduling system
-- [x] Status bar indicator
-- [x] Manual sync commands
-- [x] Development mode with auto-sync (debounced)
-
-### ✅ Completed (v0.2.0)
-- [x] Editorial calendar sidebar view
-
-### ✅ Completed (v0.2.7)
-- [x] Paywall marker (`--members-only--`) with live editor decoration and auto-deduplication
-
-### 🚧 Future Features
-- [ ] Two-way sync (Ghost → Obsidian)
-- [ ] Ghost pages support
-- [ ] Media upload support
-- [ ] Conflict resolution
-- [ ] Bulk operations
-- [ ] Post templates
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-MIT
+Licensed under the **MIT License** — see [LICENSE](LICENSE). The original copyright and license notice are retained.
 
 ## Support
 
-If you encounter any issues or have questions, please [open an issue](https://github.com/diegoeis/ghost-writer-manager-plugin/issues).
-
-
-
-
-
+Please [open an issue](https://github.com/alexy/ghost-updater/issues) for bugs or questions about this fork.
