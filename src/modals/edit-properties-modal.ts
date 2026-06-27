@@ -48,6 +48,7 @@ export class EditGhostPropertiesModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
+		this.modalEl.addClass('ghost-updater-modal');
 		contentEl.empty();
 		contentEl.createEl('h3', { text: `Ghost properties — ${this.title}` });
 

@@ -150,6 +150,12 @@ export function markdownToLexical(markdown: string): string {
 		i++;
 	}
 
+	// Ghost rejects a lexical document with no children, so an empty note would
+	// fail to publish. Ensure there is always at least one (empty) paragraph.
+	if (nodes.length === 0) {
+		nodes.push(createParagraph(''));
+	}
+
 	const lexical: LexicalDocument = {
 		root: {
 			type: 'root',

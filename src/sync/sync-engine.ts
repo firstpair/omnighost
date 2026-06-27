@@ -182,8 +182,12 @@ export class SyncEngine {
 			console.debug('[Ghost Sync] Lexical length:', lexical.length);
 			console.debug('[Ghost Sync] Lexical preview:', lexical.substring(0, 200));
 
-			// Extract title
-			const title = extractTitle(markdownContent);
+			// Extract title — fall back to the note's filename when there is no
+			// heading / first line (e.g. an empty or body-less note).
+			let title = extractTitle(markdownContent);
+			if (!title || title === 'Untitled') {
+				title = file.basename;
+			}
 			console.debug('[Ghost Sync] Extracted title:', title);
 
 			// Generate or use existing slug

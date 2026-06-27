@@ -549,6 +549,15 @@
 	padding-top: 0;
 }
 
+/* Edit-properties modal: wider so property labels aren't cramped */
+.ghost-updater-modal {
+	width: 600px;
+	max-width: 92vw;
+}
+.ghost-updater-modal .setting-item-name {
+	white-space: normal;
+}
+
 /* Edit-properties modal: hide the publish-date row unless scheduling */
 .ghost-updater-hidden {
 	display: none;

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-06-27
+
+### Fixed
+- **Empty note no longer errors on sync.** An empty body produced an empty Lexical document, which Ghost rejected; it now publishes with a single empty paragraph. The title also falls back to the note's filename when there is no heading.
+
+### Changed
+- The Edit Ghost properties modal is **wider** and wraps long property labels, so names aren't cramped.
+
 ## [0.4.3] - 2026-06-27
 
 ### Added
