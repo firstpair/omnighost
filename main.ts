@@ -509,9 +509,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		try {
-			const isValid = await this.ghostClient.testConnection();
-			if (isValid) {
-				new Notice('Successfully connected to ghost!');
+			const title = await this.ghostClient.testConnection();
+			if (title) {
+				new Notice(`Successfully connected to ${title}`);
 			} else {
 				new Notice('Failed to connect to ghost. Please check your credentials.');
 			}

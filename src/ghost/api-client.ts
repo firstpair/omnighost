@@ -248,19 +248,20 @@ export class GhostAPIClient {
 	/**
 	 * Test connection to Ghost Admin API
 	 */
-	async testConnection(): Promise<boolean> {
+	async testConnection(): Promise<string | null> {
 		try {
 			const response = await this.makeRequest('/site/');
 
 			if (response.status === 200) {
-				return true;
+				const title = (response.json as { site?: { title?: string } })?.site?.title;
+				return title && title.trim() ? title.trim() : 'Ghost';
 			}
 
 			console.error('Ghost connection test failed:', response.status, response.text);
-			return false;
+			return null;
 		} catch (error) {
 			console.error('Ghost connection test error:', error);
-			return false;
+			return null;
 		}
 	}
 

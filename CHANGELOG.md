@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-06-27
+
+### Changed
+- **Test Connection now reports the blog title** — e.g. "Successfully connected to Strongly Typed AI News" — instead of a generic message, so you can confirm you're connected to the right site.
+
 ## [0.4.6] - 2026-06-27
 
 ### Changed
