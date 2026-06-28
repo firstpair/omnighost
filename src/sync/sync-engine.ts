@@ -13,10 +13,16 @@ import { processPostImages } from '../ghost/image-uploader';
 export class SyncEngine {
 	private app: App;
 	private settings: GhostWriterSettings;
-	private ghostClient: GhostAPIClient;
 	private imageCache: Record<string, string>;
 	private saveImageCache?: () => Promise<void>;
 	public onStatusChange?: (status: 'idle' | 'syncing' | 'success' | 'error', message?: string) => void;
+
+	// The blog a sync currently targets. The plugin points this at the right blog
+	// before each sync, so one note can be published to several blogs in turn.
+	private ghostClient: GhostAPIClient;     // active blog's API client
+	private activeBaseUrl: string;           // active blog's site URL
+	private activeFolder: string;            // active blog's vault folder
+	private writeBack = true;                // write ghost_id/url back? (off for multi-blog)
 
 	constructor(
 		app: App,
@@ -30,6 +36,21 @@ export class SyncEngine {
 		this.ghostClient = ghostClient;
 		this.imageCache = imageCache;
 		this.saveImageCache = saveImageCache;
+		this.activeBaseUrl = settings.ghostUrl;
+		this.activeFolder = settings.syncFolder;
+	}
+
+	/**
+	 * Point the engine at a specific blog before a sync. `writeBack` controls
+	 * whether ghost_id/url/public_url are written back to the note — enabled for a
+	 * single-blog note (robust id tracking), disabled for multi-blog notes (each
+	 * blog is matched by slug instead, so per-blog ids don't collide in one note).
+	 */
+	setActiveBlog(client: GhostAPIClient, baseUrl: string, folder: string, writeBack: boolean): void {
+		this.ghostClient = client;
+		this.activeBaseUrl = baseUrl;
+		this.activeFolder = folder;
+		this.writeBack = writeBack;
 	}
 
 	/**
@@ -48,7 +69,7 @@ export class SyncEngine {
 		}
 
 		const prefix = this.settings.yamlPrefix;
-		const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
+		const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 		const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${post.id}`;
 		const isPublic = post.status === 'published' || post.status === 'scheduled';
 
@@ -322,8 +343,8 @@ export class SyncEngine {
 				const needsId = !resolvedGhostId;
 				const needsUrl = !metadata.ghost_url;
 				const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
-				if (needsId || needsUrl || needsPublic) {
-					const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
+				if (this.writeBack && (needsId || needsUrl || needsPublic)) {
+					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
 					let updatedContent = content;
 					if (needsId) {
@@ -346,19 +367,21 @@ export class SyncEngine {
 				// `ghost_id` from disk and updates in place, so this no longer needs a
 				// delay to avoid a duplicate — and it makes the public URL available
 				// right after publishing (e.g. for the properties modal).
-				const capturedGhostPost = ghostPost;
-				const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
-				const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
-				const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
-				let updatedContent = updateFrontmatterWithGhostId(
-					content,
-					capturedGhostPost.id,
-					capturedGhostPost.slug,
-					this.settings.yamlPrefix
-				);
-				updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-				await this.app.vault.modify(file, updatedContent);
-				console.debug('[Ghost Sync] Frontmatter updated with Ghost ID, editor URL, public URL');
+				if (this.writeBack) {
+					const capturedGhostPost = ghostPost;
+					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
+					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
+					const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
+					let updatedContent = updateFrontmatterWithGhostId(
+						content,
+						capturedGhostPost.id,
+						capturedGhostPost.slug,
+						this.settings.yamlPrefix
+					);
+					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+					await this.app.vault.modify(file, updatedContent);
+					console.debug('[Ghost Sync] Frontmatter updated with Ghost ID, editor URL, public URL');
+				}
 			}
 
 			// Update last sync time
@@ -384,15 +407,15 @@ export class SyncEngine {
 
 		try {
 			// Get all files in sync folder
-			const syncFolder = this.app.vault.getAbstractFileByPath(this.settings.syncFolder);
+			const syncFolder = this.app.vault.getAbstractFileByPath(this.activeFolder);
 			if (!syncFolder) {
-				new Notice(`Sync folder not found: ${this.settings.syncFolder}`);
+				new Notice(`Sync folder not found: ${this.activeFolder}`);
 				return results;
 			}
 
 			// Get all markdown files recursively
 			const files = this.app.vault.getMarkdownFiles().filter(file =>
-				file.path.startsWith(this.settings.syncFolder)
+				file.path.startsWith(this.activeFolder)
 			);
 
 			if (files.length === 0) {
@@ -442,7 +465,7 @@ export class SyncEngine {
 	 */
 	shouldSyncFile(file: TFile): boolean {
 		// Must be in sync folder
-		if (!file.path.startsWith(this.settings.syncFolder)) {
+		if (!file.path.startsWith(this.activeFolder)) {
 			return false;
 		}
 

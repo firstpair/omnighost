@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-28
+
+### Added
+- **Multiple Ghost blogs.** Configure several blogs in Settings, each with its own site address, Admin API key (keychain secret), and folder. The legacy single-blog config is migrated automatically into the first blog.
+- **Per-note blog selection.** "Set blog(s) for this note" command opens a picker; the chosen blogs are stored in the note's `g_blog` property and stick. A note can target several blogs at once — syncing publishes/updates all of them (one-to-many). The last blog you pick becomes the default for new notes.
+- **Import all posts.** "Import all posts from a ghost blog" command fetches every post from the chosen blog and writes each as a note in that blog's folder, tagged with `g_blog`.
+
+### Changed
+- Sync routing is now blog-aware: a single-blog note tracks its post by `ghost_id` (robust); a multi-blog note matches each blog by slug. "Sync all" walks every blog folder.
+
 ## [0.6.0] - 2026-06-28
 
 Release **Pessoa** — publishing UX and reliability milestone (see RELEASES.md). Rolls up the 0.4.x–0.5.x properties modal, prefix migration, separate image-cache file, and the validation/indicator fixes into a named release. No code change since 0.5.3.

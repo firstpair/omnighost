@@ -1,11 +1,30 @@
 /**
+ * One configured Ghost blog. Each blog has its own URL, Admin API key (stored in
+ * the keychain under `apiKeySecretName`), and its own folder for imported posts.
+ */
+export interface GhostBlog {
+	id: string;               // stable, generated id
+	name: string;             // display name (used as the value of the note's g_blog)
+	url: string;
+	apiKeySecretName: string; // name of the secret in Obsidian's keychain
+	folder: string;           // vault folder for this blog's posts
+}
+
+/**
  * Plugin settings interface
  * Note: ghostAdminApiKey is stored securely in Obsidian's Secrets (Keychain)
  */
 export interface GhostWriterSettings {
+	// Multiple blogs. The first time the plugin loads, the legacy single-blog
+	// fields below are migrated into blogs[0].
+	blogs: GhostBlog[];
+	defaultBlogId: string; // last-selected blog; default for new notes
+
+	// Legacy single-blog fields (kept for migration / backward compatibility).
 	ghostUrl: string;
 	ghostApiKeySecretName: string; // Name of the secret in Obsidian's Keychain
 	syncFolder: string;
+
 	syncInterval: number; // in minutes
 	yamlPrefix: string;
 	lastSync: number;
@@ -18,6 +37,8 @@ export interface GhostWriterSettings {
  * Default settings
  */
 export const DEFAULT_SETTINGS: GhostWriterSettings = {
+	blogs: [],
+	defaultBlogId: '',
 	ghostUrl: '',
 	ghostApiKeySecretName: 'ghost-api-key',
 	syncFolder: 'Ghost Posts',

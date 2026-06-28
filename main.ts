@@ -1,5 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, normalizePath, debounce, Modal, ButtonComponent, parseYaml } from 'obsidian';
-import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost } from './src/types';
+import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog } from './src/types';
 import { GhostAPIClient } from './src/ghost/api-client';
 import { generateNewPostTemplate, addGhostPropertiesToContent } from './src/templates';
 import { SyncEngine } from './src/sync/sync-engine';
@@ -8,6 +8,7 @@ import { ImportFromGhostModal } from './src/modals/import-from-ghost-modal';
 import { LinkToGhostModal } from './src/modals/link-to-ghost-modal';
 import { EditGhostPropertiesModal, GhostPropsForm } from './src/modals/edit-properties-modal';
 import { MigratePrefixModal } from './src/modals/migrate-prefix-modal';
+import { SelectBlogsModal } from './src/modals/select-blogs-modal';
 import { updateFrontmatterWithGhostUrl, updateFrontmatterWithGhostId, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
 import { htmlToMarkdown } from './src/converters/html-to-markdown';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
@@ -23,6 +24,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	syncEngine: SyncEngine;
 	/** Uploaded image content-hash → Ghost URL. Stored in its own file, separate from settings. */
 	imageCache: Record<string, string> = {};
+	/** API clients keyed by blog id. */
+	private blogClients = new Map<string, GhostAPIClient>();
 	private syncDebounced?: (file: TFile) => void;
 	private statusBarItem: HTMLElement;
 	private periodicSyncInterval: number;
@@ -31,6 +34,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		await this.loadSettings();
 		await this.loadImageCache();
 		await this.migrateLegacyImageCache();
+		await this.migrateBlogs();
 
 		// Get API key from secure keychain
 		const apiKey = this.loadApiKey();
@@ -42,8 +46,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			this.app
 		);
 
-		// Initialize sync engine
+		// Initialize sync engine, pointed at the default blog
 		this.syncEngine = new SyncEngine(this.app, this.settings, this.ghostClient, this.imageCache, () => this.saveImageCache());
+		this.restoreDefaultBlogContext();
 
 		// Connect sync engine to status bar
 		this.syncEngine.onStatusChange = (status, message) => {
@@ -56,7 +61,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			this.syncDebounced = debounce(
 				async (file: TFile) => {
 					if (this.syncEngine.shouldSyncFile(file)) {
-						await this.syncEngine.syncFileToGhost(file);
+						await this.syncFileRouted(file);
 					}
 				},
 				2000,
@@ -229,6 +234,23 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 		});
 
+		// Choose which blog(s) the active note publishes to
+		this.addCommand({
+			id: 'set-note-blogs',
+			name: 'Set blog(s) for this note',
+			editorCallback: (_editor, view) => {
+				if (!view.file) { new Notice('No active file'); return; }
+				this.openSetBlogsModal(view.file);
+			}
+		});
+
+		// Import all posts from a Ghost blog into its folder
+		this.addCommand({
+			id: 'import-all-posts',
+			name: 'Import all posts from a ghost blog',
+			callback: () => { this.openImportAllModal(); }
+		});
+
 		// Add command to insert the paywall marker at the cursor
 		this.addCommand({
 			id: 'insert-paywall-marker',
@@ -389,7 +411,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		// Setup periodic sync
 		this.periodicSyncInterval = window.setInterval(() => {
 			console.debug('[Ghost Sync] Running periodic sync...');
-			void this.syncEngine.syncAllFiles();
+			void this.syncAllRouted();
 		}, intervalMs);
 	}
 
@@ -539,7 +561,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		try {
-			await this.syncEngine.syncAllFiles();
+			await this.syncAllRouted();
 		} catch (error) {
 			console.error('Sync failed:', error);
 			new Notice(`Sync failed: ${(error as Error).message}`);
@@ -696,6 +718,224 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	 * Clear the cached image-upload map (content hash -> Ghost URL) without
 	 * touching any other settings. Use this instead of deleting data.json.
 	 */
+	// ─── Multiple Ghost blogs ────────────────────────────────────────────────
+
+	genBlogId(): string {
+		return 'blog-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+	}
+
+	private deriveBlogName(url: string): string {
+		try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+	}
+
+	/** Read an Admin API key from the keychain by secret name. */
+	loadApiKeyForSecret(secretName: string): string {
+		if (!secretName || !this.app.secretStorage) return '';
+		try {
+			return this.app.secretStorage.getSecret(secretName) || '';
+		} catch (e) {
+			console.error('[Ghost] Error loading secret', secretName, e);
+			return '';
+		}
+	}
+
+	/** Migrate the legacy single-blog config into blogs[] on first run. */
+	private async migrateBlogs(): Promise<void> {
+		if (this.settings.blogs && this.settings.blogs.length > 0) {
+			if (!this.settings.defaultBlogId || !this.settings.blogs.some(b => b.id === this.settings.defaultBlogId)) {
+				this.settings.defaultBlogId = this.settings.blogs[0].id;
+				await this.saveSettings();
+			}
+			return;
+		}
+		const blog: GhostBlog = {
+			id: this.genBlogId(),
+			name: this.deriveBlogName(this.settings.ghostUrl) || 'My blog',
+			url: this.settings.ghostUrl,
+			apiKeySecretName: this.settings.ghostApiKeySecretName,
+			folder: this.settings.syncFolder
+		};
+		this.settings.blogs = [blog];
+		this.settings.defaultBlogId = blog.id;
+		await this.saveSettings();
+	}
+
+	/** Get (or create) the API client for a blog. */
+	getClientForBlog(blog: GhostBlog): GhostAPIClient {
+		const key = this.loadApiKeyForSecret(blog.apiKeySecretName);
+		let client = this.blogClients.get(blog.id);
+		if (!client) {
+			client = new GhostAPIClient(blog.url, key, this.app);
+			this.blogClients.set(blog.id, client);
+		} else {
+			client.updateCredentials(blog.url, key);
+		}
+		return client;
+	}
+
+	/** The default (last-selected) blog, or the first, or null. */
+	defaultBlog(): GhostBlog | null {
+		return this.settings.blogs.find(b => b.id === this.settings.defaultBlogId)
+			?? this.settings.blogs[0] ?? null;
+	}
+
+	/** Resolve which blog(s) a note targets, from its g_blog property; else the default. */
+	resolveBlogsForFile(file: TFile): GhostBlog[] {
+		const prefix = this.settings.yamlPrefix;
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		const raw = fm ? fm[`${prefix}blog`] : undefined;
+		const names = Array.isArray(raw)
+			? raw.map(v => String(v).trim()).filter(Boolean)
+			: (typeof raw === 'string' && raw.trim() ? [raw.trim()] : []);
+		if (names.length > 0) {
+			const lower = names.map(n => n.toLowerCase());
+			const found = this.settings.blogs.filter(b => lower.includes(b.name.toLowerCase()));
+			if (found.length > 0) return found;
+		}
+		const def = this.defaultBlog();
+		return def ? [def] : [];
+	}
+
+	private restoreDefaultBlogContext(): void {
+		const d = this.defaultBlog();
+		if (d) this.syncEngine.setActiveBlog(this.getClientForBlog(d), d.url, d.folder, true);
+	}
+
+	/** Sync a note to each of its target blogs (one-to-many). */
+	async syncFileRouted(file: TFile): Promise<boolean> {
+		const blogs = this.resolveBlogsForFile(file);
+		if (blogs.length === 0) {
+			new Notice('No ghost blog configured — add one in settings.');
+			return false;
+		}
+		const writeBack = blogs.length === 1;
+		let ok = true;
+		for (const blog of blogs) {
+			this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, writeBack);
+			try {
+				ok = (await this.syncFileRouted(file)) && ok;
+			} catch (e) {
+				new Notice(`Sync to ${blog.name} failed: ${(e as Error).message}`);
+				ok = false;
+			}
+		}
+		this.restoreDefaultBlogContext();
+		return ok;
+	}
+
+	/** Sync every note across all blog folders, each to its own blog(s). */
+	async syncAllRouted(): Promise<void> {
+		const files = new Set<TFile>();
+		for (const blog of this.settings.blogs) {
+			const folder = normalizePath(blog.folder);
+			this.app.vault.getMarkdownFiles()
+				.filter(f => f.path === folder || f.path.startsWith(folder + '/'))
+				.forEach(f => files.add(f));
+		}
+		if (files.size === 0) {
+			new Notice('No notes to sync (check your blog folders).');
+			return;
+		}
+		new Notice(`Syncing ${files.size} note(s)…`);
+		let success = 0;
+		let failed = 0;
+		for (const f of files) {
+			if (await this.syncFileRouted(f)) success++; else failed++;
+		}
+		new Notice(`Sync complete: ${success} ok${failed ? `, ${failed} failed` : ''}`);
+	}
+
+	/** Picker to set which blog(s) the active note publishes to. */
+	private openSetBlogsModal(file: TFile): void {
+		const current = this.resolveBlogsForFile(file).map(b => b.id);
+		new SelectBlogsModal(
+			this.app, this.settings.blogs, current,
+			{ heading: 'Publish this note to…', confirmLabel: 'Set' },
+			async (chosen) => {
+				const prefix = this.settings.yamlPrefix;
+				const names = chosen.map(b => b.name);
+				const yaml = `[${names.map(n => `"${n}"`).join(', ')}]`;
+				let content = await this.app.vault.read(file);
+				content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
+				await this.app.vault.modify(file, content);
+				this.settings.defaultBlogId = chosen[chosen.length - 1].id; // last = default
+				await this.saveSettings();
+				new Notice(`Note will publish to: ${names.join(', ')}`);
+			}
+		).open();
+	}
+
+	/** Picker to choose a blog (or blogs) to import all posts from. */
+	private openImportAllModal(): void {
+		const def = this.defaultBlog();
+		new SelectBlogsModal(
+			this.app, this.settings.blogs, def ? [def.id] : [],
+			{ heading: 'Import all posts from…', confirmLabel: 'Import' },
+			async (chosen) => {
+				for (const blog of chosen) await this.importAllFromBlog(blog);
+			}
+		).open();
+	}
+
+	/** Fetch every post from a blog and write each as a note in the blog's folder. */
+	private async importAllFromBlog(blog: GhostBlog): Promise<void> {
+		const apiKey = this.loadApiKeyForSecret(blog.apiKeySecretName);
+		if (!blog.url || !apiKey) {
+			new Notice(`Blog "${blog.name}" is missing its URL or API key.`);
+			return;
+		}
+		const client = this.getClientForBlog(blog);
+		try {
+			new Notice(`Importing all posts from ${blog.name}…`);
+			const posts = await client.getPosts(undefined, 'all', 'published_at desc');
+			const folder = normalizePath(blog.folder);
+			if (!this.app.vault.getAbstractFileByPath(folder)) {
+				await this.app.vault.createFolder(folder);
+			}
+			let count = 0;
+			for (const post of posts) {
+				const editorUrl = `${blog.url.replace(/\/$/, '')}/ghost/#/editor/post/${post.id}`;
+				await this.writePostAsNoteInFolder(post, editorUrl, folder, blog.name);
+				count++;
+			}
+			new Notice(`Imported ${count} post${count === 1 ? '' : 's'} from ${blog.name} into ${folder}`);
+		} catch (e) {
+			new Notice(`Import from ${blog.name} failed: ${(e as Error).message}`);
+		}
+	}
+
+	/** Write one Ghost post as a note in a folder, tagged with its blog. */
+	private async writePostAsNoteInFolder(post: GhostPost, editorUrl: string, folder: string, blogName: string): Promise<void> {
+		const prefix = this.settings.yamlPrefix;
+		const tags = (post.tags ?? []).map(t => t.name);
+		const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
+		const isPub = post.status === 'published' || post.status === 'scheduled';
+		const frontmatter = [
+			`${prefix}blog: ["${blogName}"]`,
+			`${prefix}post_access: ${post.visibility ?? 'public'}`,
+			`${prefix}published: ${isPub ? 'true' : 'false'}`,
+			`${prefix}published_at: "${post.published_at ?? ''}"`,
+			`${prefix}featured: ${post.featured ? 'true' : 'false'}`,
+			`${prefix}tags: ${tagsYaml}`,
+			`${prefix}excerpt: "${(post.excerpt ?? '').replace(/"/g, '\\"')}"`,
+			`${prefix}feature_image: "${post.feature_image ?? ''}"`,
+			`${prefix}no_sync: false`,
+			`${prefix}id: ${post.id}`,
+			`${prefix}slug: ${post.slug}`,
+			`${prefix}url: ${editorUrl}`
+		].join('\n');
+		const title = post.title || 'Untitled Post';
+		const safe = title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Untitled Post';
+		const body = htmlToMarkdown(post.html ?? '');
+		const content = `---\n${frontmatter}\n---\n\n# ${title}\n\n${body}`;
+		let path = normalizePath(`${folder}/${safe}.md`);
+		if (this.app.vault.getAbstractFileByPath(path)) {
+			path = normalizePath(`${folder}/${safe}-${post.id}.md`);
+		}
+		if (this.app.vault.getAbstractFileByPath(path)) return; // already imported
+		await this.app.vault.create(path, content);
+	}
+
 	private async clearImageCache(): Promise<void> {
 		const n = Object.keys(this.imageCache).length;
 		this.imageCache = {};
@@ -794,7 +1034,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			new Notice('Ghost properties saved');
 			if (doSync) {
 				try {
-					await this.syncEngine.syncFileToGhost(file);
+					await this.syncFileRouted(file);
 				} catch (e) {
 					new Notice(`Sync failed: ${(e as Error).message}`);
 				}
@@ -914,7 +1154,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				const movedFile = await this.ensureInSyncFolder(file);
 
 				// Sync the note to Ghost (overwrites Ghost post)
-				await this.syncEngine.syncFileToGhost(movedFile ?? file);
+				await this.syncFileRouted(movedFile ?? file);
 
 				new Notice(`Linked and synced note to Ghost: "${file.basename}"`);
 			}
@@ -1004,7 +1244,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 
 		// Run sync with user feedback
 		new Notice(`Syncing "${targetFile.basename}"…`);
-		const success = await this.syncEngine.syncFileToGhost(targetFile);
+		const success = await this.syncFileRouted(targetFile);
 
 		if (!success) {
 			new Notice(`Sync failed for "${targetFile.basename}". Check the console for details.`);
@@ -1169,78 +1409,80 @@ class GhostWriterSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	/** Render the multi-blog manager: one editable block per blog, plus "Add blog". */
+	private renderBlogsSettings(containerEl: HTMLElement): void {
+		const plugin = this.plugin;
+
+		new Setting(containerEl).setHeading().setName('Ghost blogs');
+		containerEl.createEl('p', {
+			cls: 'setting-item-description',
+			text: 'Each blog has its own address, key, and folder. A note publishes to the blog(s) named in its g_blog property; the last blog you pick becomes the default for new notes.'
+		});
+
+		plugin.settings.blogs.forEach((blog) => {
+			const isDefault = blog.id === plugin.settings.defaultBlogId;
+			new Setting(containerEl)
+				.setHeading()
+				.setName(`${blog.name || 'Untitled blog'}${isDefault ? '  ★ default' : ''}`)
+				.addExtraButton(b => b
+					.setIcon('star')
+					.setTooltip('Set as default')
+					.onClick(async () => { plugin.settings.defaultBlogId = blog.id; await plugin.saveSettings(); this.display(); }))
+				.addExtraButton(b => b
+					.setIcon('trash')
+					.setTooltip('Remove blog')
+					.onClick(async () => {
+						plugin.settings.blogs = plugin.settings.blogs.filter(x => x.id !== blog.id);
+						if (plugin.settings.defaultBlogId === blog.id) {
+							plugin.settings.defaultBlogId = plugin.settings.blogs[0]?.id ?? '';
+						}
+						await plugin.saveSettings();
+						this.display();
+					}));
+
+			new Setting(containerEl).setName('Name')
+				.addText(t => t.setValue(blog.name).onChange(async v => { blog.name = v.trim(); await plugin.saveSettings(); }));
+			new Setting(containerEl).setName('Site address')
+				.addText(t => t.setPlaceholder('https://yourblog.com').setValue(blog.url).onChange(async v => { blog.url = v.trim(); await plugin.saveSettings(); }));
+			new Setting(containerEl).setName('Key secret name')
+				.setDesc('Name of the keychain secret holding the admin key')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case
+				.addText(t => t.setPlaceholder('secret name').setValue(blog.apiKeySecretName).onChange(async v => { blog.apiKeySecretName = v.trim(); await plugin.saveSettings(); }))
+				.addExtraButton(b => b.setIcon('key').setTooltip('Open keychain settings').onClick(() => {
+					const a = this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } };
+					a.setting.open(); a.setting.openTabById('keychain');
+				}));
+			new Setting(containerEl).setName('Folder')
+				.setDesc("Vault folder for this blog's posts")
+				.addText(t => t.setPlaceholder('Ghost posts').setValue(blog.folder).onChange(async v => { blog.folder = v.trim(); await plugin.saveSettings(); }));
+			new Setting(containerEl).setName('Test connection')
+				.addButton(btn => btn.setButtonText('Test').onClick(async () => {
+					const title = await plugin.getClientForBlog(blog).testConnection();
+					new Notice(title ? `Connected to ${title}` : `Failed to connect to ${blog.name}`);
+				}));
+		});
+
+		new Setting(containerEl).addButton(b => b.setButtonText('Add blog').setCta().onClick(async () => {
+			const blog: GhostBlog = { id: plugin.genBlogId(), name: 'New blog', url: '', apiKeySecretName: 'ghost-api-key', folder: 'Ghost Posts' };
+			plugin.settings.blogs.push(blog);
+			if (!plugin.settings.defaultBlogId) plugin.settings.defaultBlogId = blog.id;
+			await plugin.saveSettings();
+			this.display();
+		}));
+	}
+
 	display(): void {
 		const { containerEl } = this;
 
 		containerEl.empty();
 
-		// Ghost configuration heading
-		new Setting(containerEl)
-			.setHeading()
-			.setName('Ghost configuration');
-
-		new Setting(containerEl)
-			.setName('Ghost URL')
-			.setDesc('Your Ghost site URL (e.g., https://yourblog.ghost.io)')
-			.addText(text => text
-				.setPlaceholder('https://yourblog.ghost.io')
-				.setValue(this.plugin.settings.ghostUrl)
-				.onChange(async (value) => {
-					this.plugin.settings.ghostUrl = value.trim();
-					await this.plugin.saveSettings();
-				}));
-
-		new Setting(containerEl)
-			.setName('Admin API key secret name')
-			.setDesc('Name of the secret in settings > keychain that contains your ghost admin API key (format: ID:secret)')
-			.addText(text => text
-				.setPlaceholder('Secret name')
-				.setValue(this.plugin.settings.ghostApiKeySecretName)
-				.onChange(async (value) => {
-					this.plugin.settings.ghostApiKeySecretName = value.trim();
-					await this.plugin.saveSettings();
-				}))
-			.then((setting) => {
-				// Add a button to open Keychain settings
-				setting.addExtraButton((button) => {
-					button
-						.setIcon('key')
-						.setTooltip('Open keychain settings')
-						.onClick(() => {
-							// Access internal Obsidian settings API to navigate to Keychain tab
-							const appWithSetting = this.app as unknown as { setting: { open: () => void; openTabById: (id: string) => void } };
-							appWithSetting.setting.open();
-							appWithSetting.setting.openTabById('keychain');
-						});
-					button.extraSettingsEl.setAttribute('aria-label', 'Open keychain settings');
-				});
-			});
-
-		new Setting(containerEl)
-			.setName('Test connection')
-			.setDesc('Verify that your ghost credentials are working')
-			.addButton(button => button
-				.setButtonText('Test connection')
-				.setCta()
-				.onClick(async () => {
-					await this.plugin.testGhostConnection();
-				}));
+		// Ghost blogs manager (URL, API key, and folder per blog)
+		this.renderBlogsSettings(containerEl);
 
 		// Sync settings heading
 		new Setting(containerEl)
 			.setHeading()
 			.setName('Sync settings');
-
-		new Setting(containerEl)
-			.setName('Sync folder')
-			.setDesc('Folder in your vault where ghost posts will be stored')
-			.addText(text => text
-				.setPlaceholder('Ghost posts')
-				.setValue(this.plugin.settings.syncFolder)
-				.onChange(async (value) => {
-					this.plugin.settings.syncFolder = value.trim();
-					await this.plugin.saveSettings();
-				}));
 
 		new Setting(containerEl)
 			.setName('Sync interval')
