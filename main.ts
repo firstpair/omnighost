@@ -768,7 +768,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			featureImage: md?.feature_image ?? ''
 		};
 
-		const info = { savedStatus: status, publicUrl: md?.public_url ?? '' };
+		// The indicator reflects what's actually LIVE on Ghost, not the note's
+		// intent: only show Published/Scheduled when a public URL exists (it is
+		// written only after a successful publish sync). Otherwise show Draft.
+		const initialPublicUrl = md?.public_url ?? '';
+		const info = { savedStatus: initialPublicUrl ? status : 'draft', publicUrl: initialPublicUrl };
 		new EditGhostPropertiesModal(this.app, file.basename, initial, info, async (form, doSync) => {
 			let updated = await this.app.vault.read(file);
 			const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
@@ -808,10 +812,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				} catch { /* ignore */ }
 			}
 			const fmd = parseGhostMetadata(freshFm, prefix);
-			const freshStatus: GhostPropsForm['status'] = !fmd?.published
+			const freshPublicUrl = fmd?.public_url ?? '';
+			const freshIntended: GhostPropsForm['status'] = !fmd?.published
 				? 'draft'
 				: (fmd.published_at ? 'schedule' : 'publish');
-			return { savedStatus: freshStatus, publicUrl: fmd?.public_url ?? '' };
+			// Only show Published/Scheduled if the sync actually wrote a public URL.
+			return { savedStatus: freshPublicUrl ? freshIntended : 'draft', publicUrl: freshPublicUrl };
 		}).open();
 	}
 

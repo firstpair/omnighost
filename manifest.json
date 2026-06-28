@@ -1,7 +1,7 @@
 {
 	"id": "ghost-updater",
 	"name": "Ghost Updater",
-	"version": "0.5.2",
+	"version": "0.5.3",
 	"minAppVersion": "1.11.4",
 	"description": "Publish and update Ghost CMS posts from Obsidian on desktop and iOS — uploads images, updates posts in place instead of duplicating, with scheduling and YAML metadata control.",
 	"author": "Alexy Khrabrov",

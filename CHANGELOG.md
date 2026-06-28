@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-06-28
+
+### Fixed
+- **Modal status indicator no longer shows "Published" after a failed sync.** Save writes `published` to the note immediately, so the green check used to appear even when the sync errored. The indicator now shows Published/Scheduled only when a public URL exists (written only after a successful publish), and Draft otherwise.
+
 ## [0.5.2] - 2026-06-28
 
 ### Fixed
