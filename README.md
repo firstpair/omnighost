@@ -1,8 +1,8 @@
-# Ghost Updater
+# Omnighost
 
 Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** — with image upload, in-place updates (no duplicates), post scheduling, YAML metadata control, automatic sync, and an editorial calendar view.
 
-> **Fork notice.** Ghost Updater is a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT). On top of the original it adds: full **iOS / mobile** compatibility, **image publishing** to Ghost with a cover-image trick, a **content-hash image cache** (so images aren't re-uploaded), and **`ghost_id` / explicit-`g_slug` upsert** so re-publishing updates the existing post instead of creating a duplicate. See the [CHANGELOG](CHANGELOG.md) for details.
+> **Fork notice.** Omnighost is a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT). On top of the original it adds: full **iOS / mobile** compatibility, **image publishing** to Ghost with a cover-image trick, a **content-hash image cache** (so images aren't re-uploaded), and **`ghost_id` / explicit-`g_slug` upsert** so re-publishing updates the existing post instead of creating a duplicate. See the [CHANGELOG](CHANGELOG.md) for details.
 
 ## Features
 
@@ -27,17 +27,17 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 
 ### Manual install (desktop or iOS)
 
-1. Download the latest release files from the [Releases page](https://github.com/alexy/ghost-updater/releases):
+1. Download the latest release files from the [Releases page](https://github.com/alexy/omnighost/releases):
    - `main.js`
    - `manifest.json`
    - `styles.css`
 2. In your vault, navigate to the `.obsidian/plugins/` folder.
-3. Create a folder called **`ghost-updater`**.
-4. Move the downloaded files into `.obsidian/plugins/ghost-updater/`.
+3. Create a folder called **`omnighost`**.
+4. Move the downloaded files into `.obsidian/plugins/omnighost/`.
 5. Restart Obsidian (or reload the app).
-6. Go to **Settings → Community plugins** and enable **Ghost Updater**.
+6. Go to **Settings → Community plugins** and enable **Omnighost**.
 
-> **iOS note.** The `.obsidian` folder is hidden in the Files app; the easiest path is to install/enable any community plugin once so the `plugins/` folder exists, then drop `ghost-updater/` in beside it. Your vault must be in a Files-accessible location (On My iPhone or iCloud Drive).
+> **iOS note.** The `.obsidian` folder is hidden in the Files app; the easiest path is to install/enable any community plugin once so the `plugins/` folder exists, then drop `omnighost/` in beside it. Your vault must be in a Files-accessible location (On My iPhone or iCloud Drive).
 
 ### Via BRAT (beta, auto-updating)
 
@@ -45,8 +45,8 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 
 1. Install **Obsidian42 - BRAT** from Community plugins and enable it.
 2. Run the command **"BRAT: Add a beta plugin for testing"**.
-3. Enter the repo: **`alexy/ghost-updater`** and confirm.
-4. Enable **Ghost Updater** under Community plugins.
+3. Enter the repo: **`alexy/omnighost`** and confirm.
+4. Enable **Omnighost** under Community plugins.
 
 BRAT will keep it updated as new releases are published.
 
@@ -54,8 +54,8 @@ BRAT will keep it updated as new releases are published.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/alexy/ghost-updater.git
-   cd ghost-updater
+   git clone https://github.com/alexy/omnighost.git
+   cd omnighost
    ```
 2. Install dependencies:
    ```bash
@@ -85,7 +85,7 @@ BRAT will keep it updated as new releases are published.
 
 ### Plugin settings
 
-1. Open Obsidian Settings → **Ghost Updater** under Community plugins.
+1. Open Obsidian Settings → **Omnighost** under Community plugins.
 2. Configure:
    - **Ghost URL** — your Ghost site URL (e.g., `https://yourblog.ghost.io`), no trailing slash
    - **Admin API Key** — stored securely in Obsidian's keychain
@@ -99,7 +99,7 @@ BRAT will keep it updated as new releases are published.
 ### Updating vs. creating (no duplicates)
 
 - The **first** publish creates the post and writes its `ghost_id` (and editor URL) back into the note's frontmatter. Every later publish updates **that** post by `ghost_id`.
-- To adopt a post that already exists on Ghost (e.g., created elsewhere) without making a duplicate, set its slug explicitly with **`g_slug`** — Ghost Updater will find that post by slug and update it in place, then record its `ghost_id`.
+- To adopt a post that already exists on Ghost (e.g., created elsewhere) without making a duplicate, set its slug explicitly with **`g_slug`** — Omnighost will find that post by slug and update it in place, then record its `ghost_id`.
 - Notes with only an auto-derived (title-based) slug always **create** — so a title collision can never silently overwrite an unrelated post.
 
 ### Images
@@ -146,7 +146,7 @@ Add `--members-only--` on its own line to mark where the public preview ends for
 ## Development
 
 ```
-ghost-updater/
+omnighost/
 ├── main.ts                       # Main plugin file
 ├── src/
 │   ├── types.ts                  # TypeScript interfaces (+ image cache)
@@ -169,7 +169,7 @@ ghost-updater/
 
 ## Credits
 
-Ghost Updater builds directly on **[Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin)** by **[Diego Eis](https://github.com/diegoeis)**. Sincere thanks to Diego for the original plugin — the sync engine, editorial calendar, Markdown→Lexical conversion, scheduling, paywall marker, and the whole foundation come from his work. Ghost Updater would not exist without it.
+Omnighost builds directly on **[Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin)** by **[Diego Eis](https://github.com/diegoeis)**. Sincere thanks to Diego for the original plugin — the sync engine, editorial calendar, Markdown→Lexical conversion, scheduling, paywall marker, and the whole foundation come from his work. Omnighost would not exist without it.
 
 This fork is maintained by **[Alexy Khrabrov](https://github.com/alexy)**, adding iOS/mobile support, image publishing with the cover-image trick, the content-hash image cache, in-place updates (no duplicates), and the public-URL frontmatter field.
 
@@ -179,4 +179,4 @@ Licensed under the **MIT License** — see [LICENSE](LICENSE). Original work © 
 
 ## Support
 
-Please [open an issue](https://github.com/alexy/ghost-updater/issues) for bugs or questions about this fork.
+Please [open an issue](https://github.com/alexy/omnighost/issues) for bugs or questions about this fork.

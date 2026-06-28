@@ -11,6 +11,7 @@ export interface GhostPropsForm {
 	visibility: 'public' | 'members' | 'paid';
 	featured: boolean;
 	coverFromFirstImage: boolean;
+	blogIds: string[]; // which blog(s) this note publishes to
 	publishedAt: string;
 	excerpt: string;
 	tags: string; // comma-separated
@@ -28,6 +29,7 @@ export class EditGhostPropertiesModal extends Modal {
 	private title: string;
 	private form: GhostPropsForm;
 	private info: GhostPropsInfo;
+	private availableBlogs: { id: string; name: string }[];
 	private onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>;
 	private dateSetting?: Setting;
 	private statusContainer?: HTMLElement;
@@ -37,18 +39,20 @@ export class EditGhostPropertiesModal extends Modal {
 		title: string,
 		initial: GhostPropsForm,
 		info: GhostPropsInfo,
+		availableBlogs: { id: string; name: string }[],
 		onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>
 	) {
 		super(app);
 		this.title = title;
 		this.form = { ...initial };
 		this.info = info;
+		this.availableBlogs = availableBlogs;
 		this.onSubmit = onSubmit;
 	}
 
 	onOpen(): void {
 		const { contentEl } = this;
-		this.modalEl.addClass('ghost-updater-modal');
+		this.modalEl.addClass('omnighost-modal');
 		contentEl.empty();
 		contentEl.createEl('h3', { text: `Ghost properties — ${this.title}` });
 
@@ -57,6 +61,24 @@ export class EditGhostPropertiesModal extends Modal {
 		// without having to reopen the modal.
 		this.statusContainer = contentEl.createDiv();
 		this.renderStatus();
+
+		// Which blog(s) this note publishes to (only when more than one is configured)
+		if (this.availableBlogs.length >= 2) {
+			new Setting(contentEl).setHeading().setName('Blogs');
+			for (const blog of this.availableBlogs) {
+				new Setting(contentEl)
+					.setName(blog.name)
+					.addToggle(t => t
+						.setValue(this.form.blogIds.includes(blog.id))
+						.onChange(v => {
+							if (v) {
+								if (!this.form.blogIds.includes(blog.id)) this.form.blogIds.push(blog.id);
+							} else {
+								this.form.blogIds = this.form.blogIds.filter(id => id !== blog.id);
+							}
+						}));
+			}
+		}
 
 		new Setting(contentEl)
 			.setName('Status')
@@ -129,8 +151,8 @@ export class EditGhostPropertiesModal extends Modal {
 		if (!c) return;
 		c.empty();
 
-		const statusRow = c.createDiv({ cls: 'ghost-updater-status' });
-		const iconEl = statusRow.createSpan({ cls: 'ghost-updater-status-icon' });
+		const statusRow = c.createDiv({ cls: 'omnighost-status' });
+		const iconEl = statusRow.createSpan({ cls: 'omnighost-status-icon' });
 		if (this.info.savedStatus === 'publish') {
 			setIcon(iconEl, 'check-circle');
 			statusRow.addClass('is-published');
@@ -144,12 +166,12 @@ export class EditGhostPropertiesModal extends Modal {
 		}
 
 		if (this.info.publicUrl) {
-			const urlRow = c.createDiv({ cls: 'ghost-updater-public-url' });
+			const urlRow = c.createDiv({ cls: 'omnighost-public-url' });
 			urlRow.createSpan({ text: 'Public URL: ' });
 			const link = urlRow.createEl('a', { text: this.info.publicUrl, href: this.info.publicUrl });
 			link.setAttr('target', '_blank');
 			link.setAttr('rel', 'noopener');
-			const copyBtn = urlRow.createEl('button', { cls: 'clickable-icon ghost-updater-copy' });
+			const copyBtn = urlRow.createEl('button', { cls: 'clickable-icon omnighost-copy' });
 			setIcon(copyBtn, 'copy');
 			copyBtn.setAttr('aria-label', 'Copy public URL');
 			copyBtn.addEventListener('click', () => {
@@ -160,7 +182,7 @@ export class EditGhostPropertiesModal extends Modal {
 
 	/** Show the publish-date row only when scheduling. */
 	private updateDateVisibility(): void {
-		this.dateSetting?.settingEl.toggleClass('ghost-updater-hidden', this.form.status !== 'schedule');
+		this.dateSetting?.settingEl.toggleClass('omnighost-hidden', this.form.status !== 'schedule');
 	}
 
 	private async submit(doSync: boolean): Promise<void> {

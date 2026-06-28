@@ -550,34 +550,34 @@
 }
 
 /* Edit-properties modal: wider so property labels aren't cramped */
-.ghost-updater-modal {
+.omnighost-modal {
 	width: 600px;
 	max-width: 92vw;
 }
-.ghost-updater-modal .setting-item-name {
+.omnighost-modal .setting-item-name {
 	white-space: normal;
 }
 
 /* Edit-properties modal: hide the publish-date row unless scheduling */
-.ghost-updater-hidden {
+.omnighost-hidden {
 	display: none;
 }
 
 /* Edit-properties modal: status indicator + public URL */
-.ghost-updater-status {
+.omnighost-status {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	margin-bottom: 6px;
 	font-weight: 600;
 }
-.ghost-updater-status.is-published {
+.omnighost-status.is-published {
 	color: var(--color-green);
 }
-.ghost-updater-status-icon {
+.omnighost-status-icon {
 	display: inline-flex;
 }
-.ghost-updater-public-url {
+.omnighost-public-url {
 	display: flex;
 	align-items: center;
 	gap: 4px;
@@ -585,9 +585,9 @@
 	font-size: var(--font-ui-small);
 	word-break: break-all;
 }
-.ghost-updater-public-url a {
+.omnighost-public-url a {
 	flex: 1;
 }
-.ghost-updater-copy {
+.omnighost-copy {
 	flex: 0 0 auto;
 }

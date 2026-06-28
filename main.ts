@@ -802,8 +802,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	/** Sync a note to each of its target blogs (one-to-many). */
-	async syncFileRouted(file: TFile): Promise<boolean> {
-		const blogs = this.resolveBlogsForFile(file);
+	/** Sync a note to a specific set of blogs (one-to-many). */
+	async syncFileToBlogs(file: TFile, blogs: GhostBlog[]): Promise<boolean> {
 		if (blogs.length === 0) {
 			new Notice('No ghost blog configured — add one in settings.');
 			return false;
@@ -813,7 +813,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		for (const blog of blogs) {
 			this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, writeBack);
 			try {
-				ok = (await this.syncFileRouted(file)) && ok;
+				ok = (await this.syncEngine.syncFileToGhost(file)) && ok;
 			} catch (e) {
 				new Notice(`Sync to ${blog.name} failed: ${(e as Error).message}`);
 				ok = false;
@@ -821,6 +821,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 		this.restoreDefaultBlogContext();
 		return ok;
+	}
+
+	/** Sync a note to the blog(s) named in its g_blog property (else the default). */
+	async syncFileRouted(file: TFile): Promise<boolean> {
+		return this.syncFileToBlogs(file, this.resolveBlogsForFile(file));
 	}
 
 	/** Sync every note across all blog folders, each to its own blog(s). */
@@ -1005,7 +1010,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			excerpt: md?.excerpt ?? '',
 			tags: (md?.tags ?? []).join(', '),
 			slug: md?.slug ?? '',
-			featureImage: md?.feature_image ?? ''
+			featureImage: md?.feature_image ?? '',
+			blogIds: this.resolveBlogsForFile(file).map(b => b.id)
 		};
 
 		// The indicator reflects what's actually LIVE on Ghost, not the note's
@@ -1013,7 +1019,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		// written only after a successful publish sync). Otherwise show Draft.
 		const initialPublicUrl = md?.public_url ?? '';
 		const info = { savedStatus: initialPublicUrl ? status : 'draft', publicUrl: initialPublicUrl };
-		new EditGhostPropertiesModal(this.app, file.basename, initial, info, async (form, doSync) => {
+		const availableBlogs = this.settings.blogs.map(b => ({ id: b.id, name: b.name }));
+		new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
 			let updated = await this.app.vault.read(file);
 			const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
 			const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
@@ -1029,12 +1036,22 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				slug: form.slug,
 				tags: tagsYaml
 			};
+			const selectedBlogs = form.blogIds
+				.map(id => this.settings.blogs.find(b => b.id === id))
+				.filter((b): b is GhostBlog => !!b);
+			if (selectedBlogs.length > 0) {
+				ghostFields.blog = `[${selectedBlogs.map(b => `"${b.name}"`).join(', ')}]`;
+			}
 			updated = upsertGhostMetadata(updated, ghostFields, prefix);
 			await this.app.vault.modify(file, updated);
+			if (selectedBlogs.length > 0) {
+				this.settings.defaultBlogId = selectedBlogs[selectedBlogs.length - 1].id; // last = default
+				await this.saveSettings();
+			}
 			new Notice('Ghost properties saved');
 			if (doSync) {
 				try {
-					await this.syncFileRouted(file);
+					await this.syncFileToBlogs(file, selectedBlogs.length ? selectedBlogs : this.resolveBlogsForFile(file));
 				} catch (e) {
 					new Notice(`Sync failed: ${(e as Error).message}`);
 				}

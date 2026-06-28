@@ -1,11 +1,19 @@
 # Changelog
 
-All notable changes to the Ghost Updater plugin will be documented in this file.
+All notable changes to the Omnighost plugin will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-06-28
+
+### Changed
+- **Renamed the plugin to Omnighost** (id `omnighost`). Install folder is now `.obsidian/plugins/omnighost/`.
+
+### Added
+- **Blog picker in the properties modal.** When more than one blog is configured, the Edit ghost properties modal shows a Blogs section (toggle each blog) that writes the note's `g_blog` and, on Save & sync, publishes to exactly those blogs.
 
 ## [0.7.0] - 2026-06-28
 
@@ -126,7 +134,7 @@ Release **Pessoa** — publishing UX and reliability milestone (see RELEASES.md)
 
 ## [0.3.0] - 2026-06-27
 
-Renamed to **Ghost Updater** — a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT), focused on publishing and reliably updating Ghost posts from Obsidian on desktop and iOS.
+Renamed to **Omnighost** — a fork of [Ghost Writer Manager](https://github.com/diegoeis/ghost-writer-manager-plugin) by Diego Eis (MIT), focused on publishing and reliably updating Ghost posts from Obsidian on desktop and iOS.
 
 ### Added
 - **Public URL in frontmatter**: for a published or scheduled post, the post's public URL is written as `g_public_url`, just below the editor URL (`g_url`), on create and on update.
@@ -137,7 +145,7 @@ Renamed to **Ghost Updater** — a fork of [Ghost Writer Manager](https://github
 
 ### Changed
 - New posts default to `g_post_access: public` (was `paid`), so notes publish publicly unless changed.
-- Plugin id is now `ghost-updater` (install folder `.obsidian/plugins/ghost-updater/`).
+- Plugin id is now `omnighost` (install folder `.obsidian/plugins/omnighost/`).
 
 ## [0.2.19] - 2026-06-27
 

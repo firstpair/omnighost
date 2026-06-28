@@ -1,6 +1,6 @@
 # Releases
 
-Ghost Updater releases are codenamed after writers.
+Omnighost releases are codenamed after writers.
 
 | Codename | Version | Date | Highlights |
 |----------|---------|------|------------|
