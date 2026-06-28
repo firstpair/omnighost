@@ -4,6 +4,8 @@ import { App, Modal, Notice, Setting, setIcon } from 'obsidian';
 export interface GhostPropsInfo {
 	savedStatus: 'draft' | 'publish' | 'schedule';
 	publicUrl: string;
+	/** Per-blog status, shown when the note targets more than one blog. */
+	blogStatuses?: { name: string; url: string; published: boolean }[];
 }
 
 export interface GhostPropsForm {
@@ -177,6 +179,30 @@ export class EditGhostPropertiesModal extends Modal {
 			copyBtn.addEventListener('click', () => {
 				void navigator.clipboard.writeText(this.info.publicUrl).then(() => new Notice('Copied public URL'));
 			});
+		}
+
+		// Per-blog status, shown when the note targets more than one blog.
+		const statuses = this.info.blogStatuses;
+		if (statuses && statuses.length >= 2) {
+			for (const bs of statuses) {
+				const row = c.createDiv({ cls: 'omnighost-public-url' });
+				const icon = row.createSpan({ cls: 'omnighost-status-icon' });
+				setIcon(icon, bs.published ? 'check-circle' : 'circle');
+				row.createSpan({ text: ` ${bs.name}: ` });
+				if (bs.url) {
+					const link = row.createEl('a', { text: bs.url, href: bs.url });
+					link.setAttr('target', '_blank');
+					link.setAttr('rel', 'noopener');
+					const copyBtn = row.createEl('button', { cls: 'clickable-icon omnighost-copy' });
+					setIcon(copyBtn, 'copy');
+					copyBtn.setAttr('aria-label', `Copy ${bs.name} URL`);
+					copyBtn.addEventListener('click', () => {
+						void navigator.clipboard.writeText(bs.url).then(() => new Notice(`Copied ${bs.name} URL`));
+					});
+				} else {
+					row.createSpan({ text: 'draft (not synced yet)' });
+				}
+			}
 		}
 	}
 

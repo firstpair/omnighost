@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-28
+
+### Added
+- **Per-blog status in the properties modal.** For a note that targets more than one blog, the modal now shows a row per blog with a published/draft icon and that blog's public URL (with a copy button), read from the per-blog `g_public_urls` map. Blogs not yet synced show "draft (not synced yet)".
+
 ## [0.8.1] - 2026-06-28
 
 ### Fixed

@@ -821,6 +821,21 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		return '{' + entries.map(([k, v]) => `"${k}": "${v}"`).join(', ') + '}';
 	}
 
+	/** Per-blog published/draft status + URL for a note (empty unless 2+ target blogs). */
+	private buildBlogStatuses(file: TFile, fmObj: Record<string, unknown>): { name: string; url: string; published: boolean }[] {
+		const prefix = this.settings.yamlPrefix;
+		const targets = this.resolveBlogsForFile(file);
+		if (targets.length < 2) return [];
+		const urlsMap = this.readBlogMap(fmObj, `${prefix}public_urls`);
+		const singlePublic = typeof fmObj[`${prefix}public_url`] === 'string' ? String(fmObj[`${prefix}public_url`]) : '';
+		const pubVal = fmObj[`${prefix}published`];
+		const isPub = pubVal === true || pubVal === 'true';
+		return targets.map(b => {
+			const url = urlsMap[b.name] || (b.id === this.settings.defaultBlogId ? singlePublic : '');
+			return { name: b.name, url, published: isPub && !!url };
+		});
+	}
+
 	/**
 	 * Sync a note to a specific set of blogs (one-to-many). Each blog is matched
 	 * by its own stored ghost_id (kept in the note's `g_ids` map) if we have one,
@@ -1077,7 +1092,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		// intent: only show Published/Scheduled when a public URL exists (it is
 		// written only after a successful publish sync). Otherwise show Draft.
 		const initialPublicUrl = md?.public_url ?? '';
-		const info = { savedStatus: initialPublicUrl ? status : 'draft', publicUrl: initialPublicUrl };
+		const info = { savedStatus: initialPublicUrl ? status : 'draft', publicUrl: initialPublicUrl, blogStatuses: this.buildBlogStatuses(file, fmObj) };
 		const availableBlogs = this.settings.blogs.map(b => ({ id: b.id, name: b.name }));
 		new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
 			let updated = await this.app.vault.read(file);
@@ -1133,7 +1148,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				? 'draft'
 				: (fmd.published_at ? 'schedule' : 'publish');
 			// Only show Published/Scheduled if the sync actually wrote a public URL.
-			return { savedStatus: freshPublicUrl ? freshIntended : 'draft', publicUrl: freshPublicUrl };
+			return { savedStatus: freshPublicUrl ? freshIntended : 'draft', publicUrl: freshPublicUrl, blogStatuses: this.buildBlogStatuses(file, freshFm) };
 		}).open();
 	}
 
