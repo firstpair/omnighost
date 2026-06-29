@@ -19,3 +19,5 @@ npm-debug.log*
 # dev config (contains vault path)
 dev.config.json
 .claude/skills/eis-product-management/
+!/main.js
+
