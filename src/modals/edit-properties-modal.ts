@@ -1,4 +1,4 @@
-import { App, Modal, Notice, Setting, setIcon } from 'obsidian';
+import { App, ButtonComponent, Modal, Notice, Setting, setIcon } from 'obsidian';
 
 /** Read-only context shown at the top of the modal (not editable). */
 export interface GhostPropsInfo {
@@ -35,6 +35,9 @@ export class EditGhostPropertiesModal extends Modal {
 	private onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>;
 	private dateSetting?: Setting;
 	private statusContainer?: HTMLElement;
+	private saveBtn?: ButtonComponent;
+	private syncBtn?: ButtonComponent;
+	private submitting = false;
 
 	constructor(
 		app: App,
@@ -141,8 +144,8 @@ export class EditGhostPropertiesModal extends Modal {
 
 		new Setting(contentEl)
 			.addButton(b => b.setButtonText('Close').onClick(() => this.close()))
-			.addButton(b => b.setButtonText('Save').onClick(() => void this.submit(false)))
-			.addButton(b => b.setButtonText('Save & sync').setCta().onClick(() => void this.submit(true)));
+			.addButton(b => { this.saveBtn = b; b.setButtonText('Save').onClick(() => void this.submit(false)); })
+			.addButton(b => { this.syncBtn = b; b.setButtonText('Save & sync').setCta().onClick(() => void this.submit(true)); });
 
 		this.updateDateVisibility();
 	}
@@ -212,12 +215,16 @@ export class EditGhostPropertiesModal extends Modal {
 	}
 
 	private async submit(doSync: boolean): Promise<void> {
-		const updated = await this.onSubmit(this.form, doSync);
-		if (doSync) {
-			// Keep the modal open and refresh the status/URL so the live link appears.
-			if (updated) this.info = updated;
-			this.renderStatus();
-		} else {
+		// Guard against a double-tap firing two syncs (which would try to create the
+		// post twice). Both Save and Save & sync close the modal when done, so the
+		// close itself confirms the action ran; the sync notices report the result.
+		if (this.submitting) return;
+		this.submitting = true;
+		this.saveBtn?.setDisabled(true);
+		this.syncBtn?.setDisabled(true);
+		try {
+			await this.onSubmit(this.form, doSync);
+		} finally {
 			this.close();
 		}
 	}
