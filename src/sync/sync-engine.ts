@@ -343,7 +343,8 @@ export class SyncEngine {
 				console.debug(`[Ghost Sync] Updating post ${targetId}`);
 				ghostPost = await this.ghostClient.updatePost(targetId, postData);
 				if (this.settings.showSyncNotifications) {
-					new Notice(`Updated in ghost: ${title}`);
+					const label = this.activeBlogName ? `blog ${this.activeBlogName}` : 'in ghost';
+					new Notice(`Updated ${label}: ${title}`);
 				}
 				console.debug(`[Ghost Sync] Updated: ${title}`);
 
@@ -370,7 +371,8 @@ export class SyncEngine {
 				console.debug('[Ghost Sync] Creating new post');
 				ghostPost = await this.ghostClient.createPost(postData);
 				if (this.settings.showSyncNotifications) {
-					new Notice(`Created in ghost: ${title}`);
+					const label = this.activeBlogName ? `blog ${this.activeBlogName}` : 'in ghost';
+					new Notice(`Created ${label}: ${title}`);
 				}
 				console.debug(`[Ghost Sync] Created: ${title}`, ghostPost);
 

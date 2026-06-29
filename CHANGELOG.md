@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.7] - 2026-06-28
+
+### Changed
+- **Sync notices name the blog.** Per-blog publish messages now read "Updated blog collected.ga: Thinking about life" / "Created blog collected.ga: …" instead of a generic "in ghost", so one-to-many syncs are clear about which blog each line refers to.
+
+
 ## [0.8.6] - 2026-06-28
 
 ### Added
