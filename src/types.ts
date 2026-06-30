@@ -4,10 +4,13 @@
  */
 export interface GhostBlog {
 	id: string;               // stable, generated id
-	name: string;             // display name (used as the value of the note's g_blog)
+	name: string;             // display name
 	url: string;
 	apiKeySecretName: string; // name of the secret in Obsidian's keychain
 	folder: string;           // vault folder for this blog's posts
+	syncEnabled?: boolean;    // per-blog periodic sync toggle
+	syncIntervalMinutes?: number; // optional per-blog sync cadence override
+	aliases?: string[];       // previous names/tokens accepted by g_blog matching
 }
 
 /**
@@ -29,6 +32,10 @@ export interface GhostWriterSettings {
 	yamlPrefix: string;
 	lastSync: number;
 	showSyncNotifications: boolean;
+	promptDeleteOnFolderDelete: boolean;
+	confirmEachRemoteDelete: boolean;
+	archiveDeletedNotes: boolean;
+	archiveFolderName: string;
 	schedulingIntervalDays: number; // days between scheduled publications
 	defaultPublishTime: string; // HH:MM (UTC) for scheduled posts
 }
@@ -46,6 +53,10 @@ export const DEFAULT_SETTINGS: GhostWriterSettings = {
 	yamlPrefix: 'ghost_',
 	lastSync: 0,
 	showSyncNotifications: true,
+	promptDeleteOnFolderDelete: true,
+	confirmEachRemoteDelete: true,
+	archiveDeletedNotes: true,
+	archiveFolderName: 'Archive',
 	schedulingIntervalDays: 7,
 	defaultPublishTime: '09:00',
 };

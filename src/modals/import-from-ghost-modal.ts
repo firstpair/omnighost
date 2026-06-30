@@ -1,6 +1,6 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
-import { GhostPost, GhostWriterSettings } from '../types';
+import { GhostBlog, GhostPost, GhostWriterSettings } from '../types';
 
 /**
  * Extract Ghost post ID from an editor URL
@@ -21,7 +21,12 @@ export function buildGhostEditorUrl(ghostSiteUrl: string, postId: string): strin
 	return `${base}/ghost/#/editor/post/${postId}`;
 }
 
-type OnImportCallback = (post: GhostPost, ghostUrl: string) => Promise<void>;
+interface BlogAwareHost {
+	blogForUrl(url: string): GhostBlog | null;
+	getClientForBlog(blog: GhostBlog): GhostAPIClient;
+}
+
+type OnImportCallback = (post: GhostPost, ghostUrl: string, blog: GhostBlog | null) => Promise<void>;
 
 /**
  * Modal for importing an existing Ghost post as a new Obsidian note
@@ -30,18 +35,21 @@ export class ImportFromGhostModal extends Modal {
 	private ghostClient: GhostAPIClient;
 	private settings: GhostWriterSettings;
 	private onImport: OnImportCallback;
+	private plugin?: BlogAwareHost;
 	private urlInput = '';
 
 	constructor(
 		app: App,
 		ghostClient: GhostAPIClient,
 		settings: GhostWriterSettings,
-		onImport: OnImportCallback
+		onImport: OnImportCallback,
+		plugin?: BlogAwareHost
 	) {
 		super(app);
 		this.ghostClient = ghostClient;
 		this.settings = settings;
 		this.onImport = onImport;
+		this.plugin = plugin;
 	}
 
 	onOpen() {
@@ -104,13 +112,16 @@ export class ImportFromGhostModal extends Modal {
 			return;
 		}
 
-		const ghostUrl = buildGhostEditorUrl(this.settings.ghostUrl, postId);
+		const blog = this.plugin ? this.plugin.blogForUrl(this.urlInput) : null;
+		const client = blog ? this.plugin?.getClientForBlog(blog) ?? this.ghostClient : this.ghostClient;
+		const baseUrl = blog ? blog.url : this.settings.ghostUrl;
+		const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
 
 		try {
 			new Notice('Fetching post from ghost...');
-			const post = await this.ghostClient.getPost(postId);
+			const post = await client.getPost(postId);
 			this.close();
-			await this.onImport(post, ghostUrl);
+			await this.onImport(post, ghostUrl, blog);
 		} catch (error) {
 			new Notice(`Failed to fetch post: ${(error as Error).message}`);
 		}

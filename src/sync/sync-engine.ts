@@ -59,6 +59,16 @@ export class SyncEngine {
 		this.activeBlogName = blogName;
 	}
 
+	private activeBlogKeySuffix(): string {
+		let base = this.activeBlogName;
+		try {
+			base = new URL(this.activeBaseUrl).hostname.replace(/^www\./, '').toLowerCase() || base;
+		} catch {
+			// Keep activeBlogName fallback.
+		}
+		return base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'blog';
+	}
+
 	/**
 	 * Seed a note from an existing Ghost post matched by slug (Ghost → Obsidian).
 	 *
@@ -77,10 +87,12 @@ export class SyncEngine {
 		const prefix = this.settings.yamlPrefix;
 		const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 		const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${post.id}`;
+		const blogSuffix = this.activeBlogKeySuffix();
 		const isPublic = post.status === 'published' || post.status === 'scheduled';
 
 		const tags = (post.tags ?? []).map(t => t.name);
 		const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
+		const excerpt = (post.excerpt ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"');
 
 		const ghostFields: Record<string, string> = {
 			post_access: post.visibility ?? 'public',
@@ -88,15 +100,15 @@ export class SyncEngine {
 			published_at: `"${post.published_at ?? ''}"`,
 			featured: post.featured ? 'true' : 'false',
 			tags: tagsYaml,
-			excerpt: `"${post.excerpt ?? ''}"`,
+			excerpt: `"${excerpt}"`,
 			feature_image: `"${post.feature_image ?? ''}"`,
 			no_sync: 'false',
-			id: post.id,
 			slug: post.slug,
-			url: ghostEditorUrl
+			[`id_${blogSuffix}`]: post.id,
+			[`url_${blogSuffix}`]: ghostEditorUrl
 		};
 		if (isPublic && post.url) {
-			ghostFields.public_url = post.url;
+			ghostFields[`public_url_${blogSuffix}`] = post.url;
 		}
 
 		let content = await this.app.vault.read(file);
@@ -352,10 +364,11 @@ export class SyncEngine {
 				// slug (no ghost_id yet) record the id; for a published or scheduled
 				// post, also record its public URL just below the editor URL.
 				const publicUrl = (status === 'published' || status === 'scheduled') ? (ghostPost.url || undefined) : undefined;
+				const ownsClean = !resolvedGhostId || resolvedGhostId === targetId;
 				const needsId = !resolvedGhostId;
 				const needsUrl = !metadata.ghost_url;
 				const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
-				if (this.writeBack && (needsId || needsUrl || needsPublic)) {
+				if (this.writeBack && ownsClean && (needsId || needsUrl || needsPublic)) {
 					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
 					let updatedContent = content;

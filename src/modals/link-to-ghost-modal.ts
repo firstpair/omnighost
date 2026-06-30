@@ -1,6 +1,6 @@
 import { App, Modal, Setting, TFile, Notice } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
-import { GhostPost, GhostWriterSettings } from '../types';
+import { GhostBlog, GhostPost, GhostWriterSettings } from '../types';
 import { extractPostIdFromUrl, buildGhostEditorUrl } from './import-from-ghost-modal';
 
 type LinkSource = 'ghost' | 'obsidian';
@@ -10,9 +10,15 @@ interface LinkResult {
 	obsidianFile: TFile;
 	source: LinkSource;
 	ghostUrl: string;
+	blog: GhostBlog | null;
 }
 
 type OnLinkCallback = (result: LinkResult) => Promise<void>;
+
+interface BlogAwareHost {
+	blogForUrl(url: string): GhostBlog | null;
+	getClientForBlog(blog: GhostBlog): GhostAPIClient;
+}
 
 /**
  * Modal for linking an existing Ghost post to an existing Obsidian note
@@ -21,6 +27,7 @@ export class LinkToGhostModal extends Modal {
 	private ghostClient: GhostAPIClient;
 	private settings: GhostWriterSettings;
 	private onLink: OnLinkCallback;
+	private plugin?: BlogAwareHost;
 
 	private source: LinkSource = 'ghost';
 	private ghostUrlInput = '';
@@ -36,12 +43,14 @@ export class LinkToGhostModal extends Modal {
 		app: App,
 		ghostClient: GhostAPIClient,
 		settings: GhostWriterSettings,
-		onLink: OnLinkCallback
+		onLink: OnLinkCallback,
+		plugin?: BlogAwareHost
 	) {
 		super(app);
 		this.ghostClient = ghostClient;
 		this.settings = settings;
 		this.onLink = onLink;
+		this.plugin = plugin;
 	}
 
 	onOpen() {
@@ -241,13 +250,16 @@ export class LinkToGhostModal extends Modal {
 			return;
 		}
 
-		const ghostUrl = buildGhostEditorUrl(this.settings.ghostUrl, postId);
+		const blog = this.plugin ? this.plugin.blogForUrl(this.ghostUrlInput) : null;
+		const client = blog ? this.plugin?.getClientForBlog(blog) ?? this.ghostClient : this.ghostClient;
+		const baseUrl = blog ? blog.url : this.settings.ghostUrl;
+		const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
 
 		try {
 			new Notice('Fetching post from ghost...');
-			const post = await this.ghostClient.getPost(postId);
+			const post = await client.getPost(postId);
 			this.close();
-			await this.onLink({ ghostPost: post, obsidianFile, source: this.source, ghostUrl });
+			await this.onLink({ ghostPost: post, obsidianFile, source: this.source, ghostUrl, blog });
 		} catch (error) {
 			new Notice(`Failed to fetch post: ${(error as Error).message}`);
 		}

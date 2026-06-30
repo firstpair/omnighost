@@ -89,10 +89,10 @@ export function migrateFrontmatterPrefix(
 export function setFrontmatterKey(raw: string, key: string, value: string): string {
 	// Escape special regex chars in key (dots, underscores, etc.)
 	const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const linePattern = new RegExp(`^${escapedKey}:.*$`, 'm');
+	const blockPattern = new RegExp(`^${escapedKey}:.*(?:\n[ \t]+.*)*$`, 'm');
 
-	if (linePattern.test(raw)) {
-		return raw.replace(linePattern, `${key}: ${value}`);
+	if (blockPattern.test(raw)) {
+		return raw.replace(blockPattern, `${key}: ${value}`);
 	}
 	// Key not found — append before the last line to keep things tidy
 	return `${raw}\n${key}: ${value}`;

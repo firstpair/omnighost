@@ -1782,16 +1782,16 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				console.error('[Ghost] bulk delete failed:', e);
 				continue;
 			}
-			if (deleteLocal && it.path) {
-				const f = this.app.vault.getAbstractFileByPath(it.path);
-				if (f) {
-					try {
-						if (this.settings.archiveDeletedNotes) await this.archiveNote(f as TFile);
-						else await this.app.vault.trash(f, true);
-					} catch (e) {
-						console.error('[Ghost] local note archive/delete failed:', e);
+				if (deleteLocal && it.path) {
+					const f = this.app.vault.getAbstractFileByPath(it.path);
+					if (f instanceof TFile) {
+						try {
+							if (this.settings.archiveDeletedNotes) await this.archiveNote(f);
+							else await this.app.fileManager.trashFile(f);
+						} catch (e) {
+							console.error('[Ghost] local note archive/delete failed:', e);
+						}
 					}
-				}
 			}
 			if (it.path && this.ghostIndex) this.ghostIndex.delete(it.path);
 		}
@@ -1819,10 +1819,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					if (!folders.some(fp => f.path === fp || f.path.startsWith(fp + '/'))) continue;
 					for (const it of this.bulkItemsForFile(f)) {
 						if (chosenIds.has(it.blogId)) items.push(it);
-					}
 				}
-				if (items.length === 0) {
-					new Notice('No linked Ghost posts found in the selected folder(s).');
+			}
+			if (items.length === 0) {
+					new Notice('No linked ghost posts found in the selected folder(s).');
 					return;
 				}
 				new BulkDeleteModal(this.app, this, {
@@ -1855,14 +1855,16 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const job = orphans[0];
 		if (!job) return;
 		const { url } = this.storedKeysForBlog(file, job.blog);
-		new OrphanPostModal(this.app, job.blog.name, url, async (decision) => {
-			try {
-				if (decision === 'delete') await this.deleteOrphanPost(file, job.blog, job.id);
-				else if (decision === 'keep') await this.keepOrphanInBoth(file, job.blog);
-			} catch (e) {
-				new Notice(`Failed: ${(e as Error).message}`);
-			}
-			this.promptOrphanedPosts(file, orphans.slice(1));
+		new OrphanPostModal(this.app, job.blog.name, url, (decision) => {
+			void (async () => {
+				try {
+					if (decision === 'delete') await this.deleteOrphanPost(file, job.blog, job.id);
+					else if (decision === 'keep') await this.keepOrphanInBoth(file, job.blog);
+				} catch (e) {
+					new Notice(`Failed: ${(e as Error).message}`);
+				}
+				this.promptOrphanedPosts(file, orphans.slice(1));
+			})();
 		}).open();
 	}
 
@@ -2059,14 +2061,14 @@ class DeleteConfirmModal extends Modal {
 	}
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl('h3', { text: 'Delete post on Ghost?' });
+		contentEl.createEl('h3', { text: 'Delete post on ghost?' });
 		const p1 = contentEl.createEl('p');
 		p1.createSpan({ text: 'Post: ' });
 		p1.createEl('strong', { text: this.postTitle });
 		const p2 = contentEl.createEl('p');
 		p2.createSpan({ text: 'Blog: ' });
 		p2.createEl('strong', { text: this.blogName });
-		contentEl.createEl('p', { text: 'This permanently deletes the post on Ghost and cannot be undone.' });
+		contentEl.createEl('p', { text: 'This permanently deletes the post on ghost and cannot be undone.' });
 		const row = contentEl.createDiv({ cls: 'modal-button-container' });
 		new ButtonComponent(row).setButtonText('Delete').setWarning().onClick(() => this.finish('delete'));
 		new ButtonComponent(row).setButtonText('Skip').onClick(() => this.finish('skip'));
@@ -2128,7 +2130,7 @@ class OrphanPostModal extends Modal {
 			a.setAttr('target', '_blank');
 			a.setAttr('rel', 'noopener');
 		}
-		contentEl.createEl('p', { text: 'Delete it on Ghost, or keep it — keeping re-adds the blog to g_blog and the note will publish to both again.' });
+		contentEl.createEl('p', { text: 'Delete it on ghost, or keep it — keeping re-adds the blog to g_blog and the note will publish to both again.' });
 		const row = contentEl.createDiv({ cls: 'modal-button-container' });
 		new ButtonComponent(row).setButtonText('Delete on ghost').setWarning().onClick(() => this.finish('delete'));
 		new ButtonComponent(row).setButtonText('Keep in both').onClick(() => this.finish('keep'));
@@ -2247,16 +2249,18 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.addText(t => {
 					let originalName = blog.name;
 					t.setValue(blog.name).onChange(async v => { blog.name = v.trim(); await plugin.saveSettings(); });
-					t.inputEl.addEventListener('blur', async () => {
-						const prev = originalName;
-						if (blog.name && prev && blog.name !== prev) {
-							originalName = blog.name;
-							blog.aliases = blog.aliases || [];
-							const lp = prev.trim().toLowerCase();
-							if (lp && lp !== blog.name.trim().toLowerCase() && !blog.aliases.includes(lp)) blog.aliases.push(lp);
-							await plugin.saveSettings();
-							await plugin.migrateBlogRename(prev, blog);
-						}
+					t.inputEl.addEventListener('blur', () => {
+						void (async () => {
+							const prev = originalName;
+							if (blog.name && prev && blog.name !== prev) {
+								originalName = blog.name;
+								blog.aliases = blog.aliases || [];
+								const lp = prev.trim().toLowerCase();
+								if (lp && lp !== blog.name.trim().toLowerCase() && !blog.aliases.includes(lp)) blog.aliases.push(lp);
+								await plugin.saveSettings();
+								await plugin.migrateBlogRename(prev, blog);
+							}
+						})();
 					});
 				});
 			new Setting(containerEl).setName('Site address')
@@ -2392,27 +2396,27 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				}));
 
 		new Setting(containerEl).setHeading().setName('Deletion');
-		new Setting(containerEl).setDesc('Deletion is never automatic. Run the command “Bulk delete posts (local notes + ghost)” to pick a blog, review a checklist of its linked posts, and confirm.');
+		new Setting(containerEl).setDesc('Deletion is never automatic. Run the command “bulk delete posts (local notes + ghost)” to pick a blog, review a checklist of its linked posts, and confirm.');
 		new Setting(containerEl).setName('Prompt on folder delete')
-			.setDesc('When you delete a folder of synced notes, pop up the same bulk-delete checklist for their Ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.')
+			.setDesc('When you delete a folder of synced notes, pop up the same bulk-delete checklist for their ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.')
 			.addToggle(toggle => toggle.setValue(this.plugin.settings.promptDeleteOnFolderDelete).onChange(async value => {
 				this.plugin.settings.promptDeleteOnFolderDelete = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl).setName('Confirm each remote delete')
-			.setDesc('During a bulk delete, also show a per-post confirmation (post + blog name) with Delete / Skip / Stop. The final bulk confirmation always shows regardless.')
+			.setDesc('During a bulk delete, also show a per-post confirmation (post + blog name) with delete / skip / stop. The final bulk confirmation always shows regardless.')
 			.addToggle(toggle => toggle.setValue(this.plugin.settings.confirmEachRemoteDelete).onChange(async value => {
 				this.plugin.settings.confirmEachRemoteDelete = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl).setName('Archive deleted notes')
-			.setDesc('When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the Ghost post is still deleted). Archived notes are never re-synced.')
+			.setDesc('When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the ghost post is still deleted). Archived notes are never re-synced.')
 			.addToggle(toggle => toggle.setValue(this.plugin.settings.archiveDeletedNotes).onChange(async value => {
 				this.plugin.settings.archiveDeletedNotes = value;
 				await this.plugin.saveSettings();
 			}));
 		new Setting(containerEl).setName('Archive subfolder name')
-			.setDesc('Name of the archive subfolder created inside each blog folder (default: Archive).')
+			.setDesc('Name of the archive subfolder created inside each blog folder (default: archive).')
 			.addText(text => text.setPlaceholder('Archive').setValue(this.plugin.settings.archiveFolderName).onChange(async value => {
 				this.plugin.settings.archiveFolderName = value.trim() || 'Archive';
 				await this.plugin.saveSettings();
@@ -2450,4 +2454,3 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				}));
 	}
 }
-

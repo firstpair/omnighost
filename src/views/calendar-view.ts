@@ -205,14 +205,19 @@ export class CalendarView extends ItemView {
 
 	private buildVaultIndex(): Map<string, TFile> {
 		const index = new Map<string, TFile>();
-		const idKey = `${this.settings.yamlPrefix}id`;
+		const prefix = this.settings.yamlPrefix;
+		const cleanId = `${prefix}id`;
+		const perBlogPrefix = `${prefix}id_`;
 
 		for (const file of this.app.vault.getMarkdownFiles()) {
 			const cache = this.app.metadataCache.getFileCache(file);
 			if (!cache?.frontmatter) continue;
-			const ghostId = cache.frontmatter[idKey] as unknown;
-			if (typeof ghostId === 'string' && ghostId) {
-				index.set(ghostId, file);
+			for (const key of Object.keys(cache.frontmatter)) {
+				if (key !== cleanId && !key.startsWith(perBlogPrefix)) continue;
+				const ghostId = cache.frontmatter[key] as unknown;
+				if (typeof ghostId === 'string' && ghostId && !index.has(ghostId)) {
+					index.set(ghostId, file);
+				}
 			}
 		}
 

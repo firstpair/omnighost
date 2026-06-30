@@ -536,7 +536,7 @@ function migrateFrontmatterPrefix(content, oldPrefix, newPrefix) {
 function setFrontmatterKey(raw, key, value) {
   const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockPattern = new RegExp(`^${escapedKey}:.*(?:
-[ \\t]+.*)*$`, "m");
+[ 	]+.*)*$`, "m");
   if (blockPattern.test(raw)) {
     return raw.replace(blockPattern, `${key}: ${value}`);
   }
@@ -1245,6 +1245,14 @@ var SyncEngine = class {
     this.activeKnownId = knownId;
     this.activeBlogName = blogName;
   }
+  activeBlogKeySuffix() {
+    let base = this.activeBlogName;
+    try {
+      base = new URL(this.activeBaseUrl).hostname.replace(/^www\./, "").toLowerCase() || base;
+    } catch (e) {
+    }
+    return base.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "blog";
+  }
   /**
    * Seed a note from an existing Ghost post matched by slug (Ghost → Obsidian).
    *
@@ -1263,32 +1271,26 @@ var SyncEngine = class {
     const prefix = this.settings.yamlPrefix;
     const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
     const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${post.id}`;
-    const host = (() => {
-      try {
-        return new URL(this.activeBaseUrl).hostname.replace(/^www\./, "").toLowerCase();
-      } catch (e) {
-        return "";
-      }
-    })();
-    const blogSlug = (host || this.activeBlogName).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "blog";
+    const blogSuffix = this.activeBlogKeySuffix();
     const isPublic = post.status === "published" || post.status === "scheduled";
     const tags = ((_a = post.tags) != null ? _a : []).map((t) => t.name);
     const tagsYaml = tags.length > 0 ? `[${tags.map((t) => `"${t}"`).join(", ")}]` : "[]";
+    const excerpt = ((_b = post.excerpt) != null ? _b : "").replace(/[\r\n]+/g, " ").replace(/"/g, '\\"');
     const ghostFields = {
-      post_access: (_b = post.visibility) != null ? _b : "public",
+      post_access: (_c = post.visibility) != null ? _c : "public",
       published: isPublic ? "true" : "false",
-      published_at: `"${(_c = post.published_at) != null ? _c : ""}"`,
+      published_at: `"${(_d = post.published_at) != null ? _d : ""}"`,
       featured: post.featured ? "true" : "false",
       tags: tagsYaml,
-      excerpt: `"${((_d = post.excerpt) != null ? _d : "").replace(/[\r\n]+/g, " ").replace(/"/g, '\\"')}"`,
+      excerpt: `"${excerpt}"`,
       feature_image: `"${(_e = post.feature_image) != null ? _e : ""}"`,
       no_sync: "false",
       slug: post.slug,
-      [`id_${blogSlug}`]: post.id,
-      [`url_${blogSlug}`]: ghostEditorUrl
+      [`id_${blogSuffix}`]: post.id,
+      [`url_${blogSuffix}`]: ghostEditorUrl
     };
     if (isPublic && post.url) {
-      ghostFields[`public_url_${blogSlug}`] = post.url;
+      ghostFields[`public_url_${blogSuffix}`] = post.url;
     }
     let content = await this.app.vault.read(file);
     content = upsertGhostMetadata(content, ghostFields, prefix);
@@ -1720,13 +1722,13 @@ var CalendarView = class extends import_obsidian4.ItemView {
       const cache = this.app.metadataCache.getFileCache(file);
       if (!(cache == null ? void 0 : cache.frontmatter))
         continue;
-      const fm = cache.frontmatter;
-      for (const key of Object.keys(fm)) {
+      for (const key of Object.keys(cache.frontmatter)) {
         if (key !== cleanId && !key.startsWith(perBlogPrefix))
           continue;
-        const val = fm[key];
-        if (typeof val === "string" && val && !index.has(val))
-          index.set(val, file);
+        const ghostId = cache.frontmatter[key];
+        if (typeof ghostId === "string" && ghostId && !index.has(ghostId)) {
+          index.set(ghostId, file);
+        }
       }
     }
     return index;
@@ -1979,6 +1981,7 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
     buttonSetting.settingEl.addClass("ghost-modal-button-row");
   }
   async handleImport() {
+    var _a, _b;
     if (!this.urlInput) {
       new import_obsidian5.Notice("Please enter a ghost editor URL");
       return;
@@ -1989,7 +1992,7 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
       return;
     }
     const blog = this.plugin ? this.plugin.blogForUrl(this.urlInput) : null;
-    const client = blog ? this.plugin.getClientForBlog(blog) : this.ghostClient;
+    const client = blog ? (_b = (_a = this.plugin) == null ? void 0 : _a.getClientForBlog(blog)) != null ? _b : this.ghostClient : this.ghostClient;
     const baseUrl = blog ? blog.url : this.settings.ghostUrl;
     const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
     try {
@@ -2142,7 +2145,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
     }
   }
   async handleLink() {
-    var _a, _b;
+    var _a, _b, _c, _d;
     if (!this.ghostUrlInput) {
       new import_obsidian6.Notice("Please enter a ghost editor URL");
       return;
@@ -2158,7 +2161,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
       return;
     }
     const blog = this.plugin ? this.plugin.blogForUrl(this.ghostUrlInput) : null;
-    const client = blog ? this.plugin.getClientForBlog(blog) : this.ghostClient;
+    const client = blog ? (_d = (_c = this.plugin) == null ? void 0 : _c.getClientForBlog(blog)) != null ? _d : this.ghostClient : this.ghostClient;
     const baseUrl = blog ? blog.url : this.settings.ghostUrl;
     const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
     try {
@@ -2183,6 +2186,7 @@ var import_obsidian7 = require("obsidian");
 var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
   constructor(app, title, initial, info, availableBlogs, onSubmit) {
     super(app);
+    this.submitting = false;
     this.title = title;
     this.form = { ...initial };
     this.info = info;
@@ -2221,7 +2225,13 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
     new import_obsidian7.Setting(contentEl).setName("Tags").setDesc("Comma-separated").addText((t) => t.setValue(this.form.tags).onChange((v) => this.form.tags = v));
     new import_obsidian7.Setting(contentEl).setName("Slug").setDesc("Leave empty to derive from the title").addText((t) => t.setValue(this.form.slug).onChange((v) => this.form.slug = v));
     new import_obsidian7.Setting(contentEl).setName("Feature image").setDesc("URL").addText((t) => t.setValue(this.form.featureImage).onChange((v) => this.form.featureImage = v));
-    new import_obsidian7.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close())).addButton((b) => b.setButtonText("Save").onClick(() => void this.submit(false))).addButton((b) => b.setButtonText("Save & sync").setCta().onClick(() => void this.submit(true)));
+    new import_obsidian7.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close())).addButton((b) => {
+      this.saveBtn = b;
+      b.setButtonText("Save").onClick(() => void this.submit(false));
+    }).addButton((b) => {
+      this.syncBtn = b;
+      b.setButtonText("Save & sync").setCta().onClick(() => void this.submit(true));
+    });
     this.updateDateVisibility();
   }
   /** Render (or re-render) the status indicator and public URL row. */
@@ -2285,12 +2295,15 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
     (_a = this.dateSetting) == null ? void 0 : _a.settingEl.toggleClass("omnighost-hidden", this.form.status !== "schedule");
   }
   async submit(doSync) {
-    const updated = await this.onSubmit(this.form, doSync);
-    if (doSync) {
-      if (updated)
-        this.info = updated;
-      this.renderStatus();
-    } else {
+    var _a, _b;
+    if (this.submitting)
+      return;
+    this.submitting = true;
+    (_a = this.saveBtn) == null ? void 0 : _a.setDisabled(true);
+    (_b = this.syncBtn) == null ? void 0 : _b.setDisabled(true);
+    try {
+      await this.onSubmit(this.form, doSync);
+    } finally {
       this.close();
     }
   }
@@ -2455,6 +2468,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.imageCache = {};
     /** API clients keyed by blog id. */
     this.blogClients = /* @__PURE__ */ new Map();
+    /** Per-blog periodic-sync timers, keyed by blog id. */
+    this.blogSyncTimers = /* @__PURE__ */ new Map();
+    /** In-memory index of synced notes: file path → { blog id → ghost post id }. */
+    /** In-memory index of synced notes: file path → its deletable note↔post links. */
+    this.ghostIndex = /* @__PURE__ */ new Map();
+    /** Folders deleted since the last batch tick (collected to detect a cascade). */
+    this.pendingDeletedFolders = [];
   }
   async onload() {
     await this.loadSettings();
@@ -2988,7 +3008,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
   /**
    * Create a new Obsidian note from a fetched Ghost post. When `blog` is known
    * (resolved from the source URL), the note is placed in that blog's folder and
-   * tagged with its domain key so it routes back to the right blog.
+   * tagged with its domain key, and records that blog's per-blog id/url/public keys.
    */
   async importPostAsNote(post, ghostUrl, blog) {
     var _a, _b, _c, _d, _e, _f;
@@ -3047,11 +3067,11 @@ ${bodyMarkdown}`;
    * Only runs when the note has an explicit slug and no `ghost_id` yet.
    */
   async seedActiveNoteFromGhost(file) {
-    var _a, _b;
+    var _a;
     const prefix = this.settings.yamlPrefix;
     const cache = this.app.metadataCache.getFileCache(file);
-    const fmObj = (_b = (_a = cache) == null ? void 0 : _a.frontmatter) != null ? _b : {};
-    const metadata = cache && cache.frontmatter ? parseGhostMetadata(cache.frontmatter, prefix) : null;
+    const fmObj = (_a = cache == null ? void 0 : cache.frontmatter) != null ? _a : {};
+    const metadata = (cache == null ? void 0 : cache.frontmatter) ? parseGhostMetadata(cache.frontmatter, prefix) : null;
     if (!(metadata == null ? void 0 : metadata.slug)) {
       new import_obsidian10.Notice(`Set ${prefix}slug on this note first to seed from Ghost`);
       return;
@@ -3098,29 +3118,19 @@ ${bodyMarkdown}`;
       return "";
     }
   }
-  /** The configured blog whose domain matches a pasted URL's host, or null. */
-  blogForUrl(url) {
-    const host = this.hostOf(url);
-    if (!host)
-      return null;
-    return this.settings.blogs.find((b) => this.hostOf(b.url) === host) || null;
-  }
   /** Frontmatter-key-safe suffix for a blog name (e.g. "Chief Scientist" → "chief_scientist"). */
   blogKeySuffix(name) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "blog";
   }
-  /** Stable, human-readable key a note stores in g_blog: the blog's domain, or its
-   *  name if the URL has no host yet. Renaming the (display) name never changes this. */
+  /** Stable, human-readable key for a blog: its domain (preferred) else lowercased name. */
   blogDomainKey(blog) {
     return this.hostOf(blog.url) || blog.name.trim().toLowerCase();
   }
-  /** Preferred frontmatter suffix for a blog's per-blog id/url keys, derived from its
-   *  domain (stable across name renames). Falls back to the name slug. */
+  /** Frontmatter-key suffix for a blog, derived from its domain (stable across renames). */
   blogKeyFor(blog) {
     return this.blogKeySuffix(this.hostOf(blog.url) || blog.name);
   }
-  /** A g_blog entry matches a blog if it equals the blog's domain key OR its name
-   *  (the latter kept so notes written before domain-keying still resolve). */
+  /** Does a g_blog token refer to this blog? Matches current domain, current name, or any alias. */
   blogMatchesToken(blog, token) {
     const t = token.trim().toLowerCase();
     if (t === this.blogDomainKey(blog) || t === blog.name.trim().toLowerCase())
@@ -3131,8 +3141,7 @@ ${bodyMarkdown}`;
   blogPropertyYaml(blogs) {
     return `[${blogs.map((b) => `"${this.blogDomainKey(b)}"`).join(", ")}]`;
   }
-  /** The frontmatter key names that store this blog's id / editor url / public url.
-   *  Writes always target the domain suffix. */
+  /** The frontmatter key names that store this blog's id / editor url / public url (writes target the domain suffix). */
   blogKeys(blog) {
     const p = this.settings.yamlPrefix;
     const s = this.blogKeyFor(blog);
@@ -3140,7 +3149,8 @@ ${bodyMarkdown}`;
   }
   /** Suffixes to try when READING a blog's per-blog keys: domain, current name, aliases. */
   blogReadSuffixes(blog) {
-    const set = /* @__PURE__ */ new Set([this.blogKeyFor(blog), this.blogKeySuffix(blog.name), ...(blog.aliases || []).map((a) => this.blogKeySuffix(a))]);
+    var _a;
+    const set = /* @__PURE__ */ new Set([this.blogKeyFor(blog), this.blogKeySuffix(blog.name), ...((_a = blog.aliases) != null ? _a : []).map((a) => this.blogKeySuffix(a))]);
     return [...set];
   }
   /** Read a blog's stored post id from a note's frontmatter (domain/name/alias keys, or old g_ids map). */
@@ -3165,14 +3175,21 @@ ${bodyMarkdown}`;
     }
     return this.readBlogMap(fmObj, `${p}public_urls`)[blog.name] || "";
   }
-  /** Per-blog frontmatter keys for this blog on a note that should be removed when
-   *  it stops targeting the blog: domain keys + any name/alias-suffix variants. */
+  /** Every per-blog id/url/public_url key name for a blog (domain + name/alias variants). */
   allBlogKeyNames(blog) {
     const p = this.settings.yamlPrefix;
     const names = [];
     for (const s of this.blogReadSuffixes(blog))
       names.push(`${p}id_${s}`, `${p}url_${s}`, `${p}public_url_${s}`);
     return names;
+  }
+  /** The configured blog whose site host matches a pasted URL's host, else null. */
+  blogForUrl(url) {
+    var _a;
+    const host = this.hostOf(url);
+    if (!host)
+      return null;
+    return (_a = this.settings.blogs.find((b) => this.hostOf(b.url) === host)) != null ? _a : null;
   }
   /** Read an Admin API key from the keychain by secret name. */
   loadApiKeyForSecret(secretName) {
@@ -3199,8 +3216,7 @@ ${bodyMarkdown}`;
       name: this.deriveBlogName(this.settings.ghostUrl) || "My blog",
       url: this.settings.ghostUrl,
       apiKeySecretName: this.settings.ghostApiKeySecretName,
-      folder: this.settings.syncFolder,
-      syncEnabled: true
+      folder: this.settings.syncFolder
     };
     this.settings.blogs = [blog];
     this.settings.defaultBlogId = blog.id;
@@ -3246,8 +3262,7 @@ ${bodyMarkdown}`;
     var _a, _b;
     return (_b = (_a = this.settings.blogs.find((b) => b.id === this.settings.defaultBlogId)) != null ? _a : this.settings.blogs[0]) != null ? _b : null;
   }
-  /** Resolve which blog(s) a note targets, from its g_blog property; else the default.
-   *  Each g_blog token matches by domain key (preferred) or legacy name. */
+  /** Resolve which blog(s) a note targets, from its g_blog property; else the default. */
   resolveBlogsForFile(file) {
     var _a;
     const prefix = this.settings.yamlPrefix;
@@ -3255,7 +3270,15 @@ ${bodyMarkdown}`;
     const raw = fm ? fm[`${prefix}blog`] : void 0;
     const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
     if (tokens.length > 0) {
-      const found = this.settings.blogs.filter((b) => tokens.some((t) => this.blogMatchesToken(b, t)));
+      const seen = /* @__PURE__ */ new Set();
+      const found = [];
+      for (const t of tokens) {
+        const b = this.settings.blogs.find((bl) => this.blogMatchesToken(bl, t));
+        if (b && !seen.has(b.id)) {
+          seen.add(b.id);
+          found.push(b);
+        }
+      }
       if (found.length > 0)
         return found;
     }
@@ -3378,247 +3401,8 @@ ${bodyMarkdown}`;
     }
     return ok;
   }
-  /** Name of the per-blog archive subfolder (where deleted notes are moved). */
-  archiveName() {
-    return (this.settings.archiveFolderName || "Archive").trim() || "Archive";
-  }
-  /** True if a path is inside any blog's archive subfolder. */
-  isArchivePath(path) {
-    const name = this.archiveName();
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
-    return folders.some((f) => f && path.startsWith(`${f}/${name}/`));
-  }
-  /** Where a deleted note is archived: <its blog folder>/<archiveName>/<relative path>. */
-  archiveTargetFor(notePath) {
-    const name = this.archiveName();
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
-    let base = "";
-    for (const f of folders) {
-      if (f && (notePath === f || notePath.startsWith(f + "/")) && f.length > base.length)
-        base = f;
-    }
-    if (!base)
-      base = notePath.split("/").slice(0, -1).join("/");
-    const rel = notePath.startsWith(base + "/") ? notePath.slice(base.length + 1) : notePath.split("/").pop();
-    return (0, import_obsidian10.normalizePath)(`${base}/${name}/${rel}`);
-  }
-  /** Move a note into its blog's archive subfolder (instead of trashing it),
-   *  preserving all its frontmatter and adding an archive record. */
-  async archiveNote(file) {
-    let dest = this.archiveTargetFor(file.path);
-    const parent = dest.split("/").slice(0, -1).join("/");
-    if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
-      try {
-        await this.app.vault.createFolder(parent);
-      } catch (e) {
-      }
-    }
-    if (this.app.vault.getAbstractFileByPath(dest)) {
-      const slash = dest.lastIndexOf("/");
-      const dot = dest.lastIndexOf(".");
-      const stamp = Date.now();
-      dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
-    }
-    const originalPath = file.path;
-    await this.app.fileManager.renameFile(file, dest);
-    const moved = this.app.vault.getAbstractFileByPath(dest);
-    if (moved instanceof import_obsidian10.TFile) {
-      try {
-        const prefix = this.settings.yamlPrefix;
-        const content = await this.app.vault.read(moved);
-        const updated = upsertFrontmatterKeys(content, {
-          [`${prefix}archived`]: "true",
-          [`${prefix}archived_at`]: `"${(/* @__PURE__ */ new Date()).toISOString()}"`,
-          [`${prefix}archived_from`]: `"${originalPath}"`,
-          [`${prefix}no_sync`]: "true"
-        });
-        if (updated !== content)
-          await this.app.vault.modify(moved, updated);
-      } catch (e) {
-        console.error("[Ghost] archive metadata stamp failed:", e);
-      }
-    }
-  }
-  /** True if the file sits inside ANY blog's folder (or the primary sync folder),
-   *  excluding archive subfolders. */
-  fileInAnyBlogFolder(file) {
-    if (this.isArchivePath(file.path))
-      return false;
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
-    return folders.some((f) => f && (file.path === f || file.path.startsWith(f + "/")));
-  }
-  /** Debounce raw delete events so a folder delete and its child-note deletes
-   *  arrive as one batch, letting us tell folder-cascades from single notes. */
-  /** Resolve the Ghost post id for each blog this note has one stored for
-   *  (per-blog g_id_<domain>, with name/alias and old-map fallbacks). Returns [{ blog, id }]. */
-  resolveGhostJobs(fmObj) {
-    const jobs = [];
-    for (const blog of this.settings.blogs) {
-      const id = this.readBlogId(fmObj, blog);
-      if (id)
-        jobs.push({ blog, id });
-    }
-    return jobs;
-  }
-  /** Build a bulk-delete item list for a file from its (live) frontmatter. */
-  bulkItemsForFile(file) {
-    const prefix = this.settings.yamlPrefix;
-    const cache = this.app.metadataCache.getFileCache(file);
-    const fmObj = (cache == null ? void 0 : cache.frontmatter) || {};
-    const pub = fmObj[`${prefix}published`];
-    const published = pub === true || pub === "true";
-    return this.resolveGhostJobs(fmObj).map((j) => ({ blogId: j.blog.id, blogName: j.blog.name, ghostId: j.id, title: file.basename, published, path: file.path }));
-  }
-  /** Maintain the in-memory index (path → linked Ghost posts) used to know what
-   *  to offer for deletion AFTER a note/folder is gone (its cache is purged). */
-  indexFile(file) {
-    if (!this.ghostIndex)
-      this.ghostIndex = /* @__PURE__ */ new Map();
-    if (!(file instanceof import_obsidian10.TFile) || file.extension !== "md")
-      return;
-    if (!this.fileInAnyBlogFolder(file)) {
-      this.ghostIndex.delete(file.path);
-      return;
-    }
-    const items = this.bulkItemsForFile(file);
-    if (items.length === 0)
-      this.ghostIndex.delete(file.path);
-    else
-      this.ghostIndex.set(file.path, items);
-  }
-  rebuildGhostIndex() {
-    this.ghostIndex = /* @__PURE__ */ new Map();
-    for (const f of this.app.vault.getMarkdownFiles()) {
-      if (this.fileInAnyBlogFolder(f))
-        this.indexFile(f);
-    }
-  }
-  scheduleDeleteBatch() {
-    if (this.deleteBatchTimer)
-      window.clearTimeout(this.deleteBatchTimer);
-    this.deleteBatchTimer = window.setTimeout(() => {
-      void this.processDeleteBatch();
-    }, 400);
-  }
-  /** A folder (with its notes) was just deleted locally. Offer the SAME bulk-delete
-   *  workflow for the remote posts those notes were linked to. Never auto-deletes. */
-  async processDeleteBatch() {
-    this.deleteBatchTimer = void 0;
-    const folders = this.pendingDeletedFolders.splice(0).map((p) => p.replace(/\/+$/, ""));
-    if (folders.length === 0 || !this.ghostIndex)
-      return;
-    const items = [];
-    for (const [path, entries] of this.ghostIndex) {
-      if (!folders.some((fp) => path === fp || path.startsWith(fp + "/")))
-        continue;
-      for (const e of entries)
-        items.push({ ...e, path });
-      this.ghostIndex.delete(path);
-    }
-    if (items.length === 0)
-      return;
-    new BulkDeleteModal(this.app, this, {
-      heading: `Folder deleted \u2014 delete ${items.length} linked Ghost post${items.length === 1 ? "" : "s"}?`,
-      subtext: "These notes were just removed locally. Choose which of their Ghost posts to also delete. Nothing is deleted until you confirm.",
-      deleteLocal: false,
-      items
-    }).open();
-  }
-  /** Delete one remote post on its blog. */
-  async deleteOneRemote(blogId, ghostId) {
-    const blog = this.settings.blogs.find((b) => b.id === blogId);
-    if (!blog)
-      throw new Error("Unknown blog for delete");
-    await this.getClientForBlog(blog).deletePost(ghostId);
-  }
-  /** Run the confirmed bulk delete: optional per-post confirm, Stop aborts the rest. */
-  async executeBulkDelete(items, deleteLocal) {
-    let ok = 0;
-    let fail = 0;
-    let skipped = 0;
-    for (const it of items) {
-      if (this.settings.confirmEachRemoteDelete) {
-        const decision = await new Promise((resolve) => {
-          new DeleteConfirmModal(this.app, it.title, it.blogName, resolve).open();
-        });
-        if (decision === "stop")
-          break;
-        if (decision === "skip") {
-          skipped++;
-          continue;
-        }
-      }
-      try {
-        await this.deleteOneRemote(it.blogId, it.ghostId);
-        ok++;
-      } catch (e) {
-        fail++;
-        console.error("[Ghost] bulk delete failed:", e);
-        continue;
-      }
-      if (deleteLocal && it.path) {
-        const f = this.app.vault.getAbstractFileByPath(it.path);
-        if (f) {
-          try {
-            if (this.settings.archiveDeletedNotes)
-              await this.archiveNote(f);
-            else
-              await this.app.vault.trash(f, true);
-          } catch (e) {
-            console.error("[Ghost] local note archive/delete failed:", e);
-          }
-        }
-      }
-      if (it.path && this.ghostIndex)
-        this.ghostIndex.delete(it.path);
-    }
-    new import_obsidian10.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}`);
-  }
-  /** On-demand bulk delete: pick blog(s), list their linked posts (all checked). */
-  openBulkDeleteCommand() {
-    if (this.settings.blogs.length === 0) {
-      new import_obsidian10.Notice("No blogs configured.");
-      return;
-    }
-    const def = this.defaultBlog();
-    new SelectBlogsModal(
-      this.app,
-      this.settings.blogs,
-      def ? [def.id] : [],
-      { heading: "Bulk delete \u2014 choose blog(s)", confirmLabel: "Next" },
-      (chosen) => {
-        const chosenIds = new Set(chosen.map((b) => b.id));
-        const folders = chosen.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-        const items = [];
-        for (const f of this.app.vault.getMarkdownFiles()) {
-          if (this.isArchivePath(f.path))
-            continue;
-          if (!folders.some((fp) => f.path === fp || f.path.startsWith(fp + "/")))
-            continue;
-          for (const it of this.bulkItemsForFile(f)) {
-            if (chosenIds.has(it.blogId))
-              items.push(it);
-          }
-        }
-        if (items.length === 0) {
-          new import_obsidian10.Notice("No linked Ghost posts found in the selected folder(s).");
-          return;
-        }
-        new BulkDeleteModal(this.app, this, {
-          heading: `Delete ${items.length} note${items.length === 1 ? "" : "s"} + their Ghost posts?`,
-          subtext: "Unchecked items are left alone. For checked items, both the local note and the remote post are deleted.",
-          deleteLocal: true,
-          items
-        }).open();
-      }
-    ).open();
-  }
   /** Sync a note to the blog(s) named in its g_blog property (else the default).
-   *  When `interactive`, also warn about any post the note still has on a blog that
-   *  is no longer in g_blog (an "orphan") and offer to delete it or keep both. */
+   *  When interactive, warn about posts on blogs no longer listed in g_blog. */
   async syncFileRouted(file, interactive = false) {
     const named = this.resolveBlogsForFile(file);
     const ok = await this.syncFileToBlogs(file, named);
@@ -3628,218 +3412,6 @@ ${bodyMarkdown}`;
         this.promptOrphanedPosts(file, orphans);
     }
     return ok;
-  }
-  /** Posts the note still has on blogs NOT named in g_blog (stored id, no longer targeted). */
-  orphanedJobsForFile(file) {
-    var _a, _b;
-    const fmObj = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
-    const namedIds = new Set(this.resolveBlogsForFile(file).map((b) => b.id));
-    return this.resolveGhostJobs(fmObj).filter((j) => !namedIds.has(j.blog.id));
-  }
-  /** Frontmatter keys that hold the stored id/URL for one blog on this note, and the public URL. */
-  storedKeysForBlog(file, blog) {
-    var _a, _b;
-    const fmObj = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
-    return { keys: this.allBlogKeyNames(blog), url: this.readBlogPublicUrl(fmObj, blog) };
-  }
-  /** Warn about each orphaned post in turn; let the user delete it on Ghost or keep both. */
-  promptOrphanedPosts(file, orphans) {
-    const job = orphans[0];
-    if (!job)
-      return;
-    const { url } = this.storedKeysForBlog(file, job.blog);
-    new OrphanPostModal(this.app, job.blog.name, url, async (decision) => {
-      try {
-        if (decision === "delete")
-          await this.deleteOrphanPost(file, job.blog, job.id);
-        else if (decision === "keep")
-          await this.keepOrphanInBoth(file, job.blog);
-      } catch (e) {
-        new import_obsidian10.Notice(`Failed: ${e.message}`);
-      }
-      this.promptOrphanedPosts(file, orphans.slice(1));
-    }).open();
-  }
-  /** Delete an orphaned post on Ghost and strip its id/URL keys from the note. */
-  async deleteOrphanPost(file, blog, ghostId) {
-    await this.deleteOneRemote(blog.id, ghostId);
-    const { keys } = this.storedKeysForBlog(file, blog);
-    let content = await this.app.vault.read(file);
-    content = removeFrontmatterKeys(content, keys);
-    await this.app.vault.modify(file, content);
-    new import_obsidian10.Notice(`Deleted orphaned post on ${blog.name}`);
-  }
-  /** Re-add an orphaned blog to g_blog and sync it now, so the note publishes to both. */
-  async keepOrphanInBoth(file, blog) {
-    const named = this.resolveBlogsForFile(file);
-    const all = named.some((b) => b.id === blog.id) ? named : [...named, blog];
-    await this.ensureBlogProperty(file, all);
-    await this.syncFileToBlogs(file, all);
-    new import_obsidian10.Notice(`Kept "${blog.name}" \u2014 this note now publishes to both`);
-  }
-  /** Write g_blog so it lists exactly `blogs` (used when keeping an orphan in both). */
-  async ensureBlogProperty(file, blogs) {
-    if (blogs.length === 0)
-      return;
-    const prefix = this.settings.yamlPrefix;
-    const yaml = this.blogPropertyYaml(blogs);
-    let content = await this.app.vault.read(file);
-    content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
-    await this.app.vault.modify(file, content);
-  }
-  /** One-shot upgrade of existing notes to domain-keyed blog references: rewrite
-   *  g_blog name tokens to domain keys, and rename per-blog id/url keys from the
-   *  name-derived suffix to the domain-derived suffix. Idempotent and additive. */
-  async normalizeBlogReferences() {
-    const prefix = this.settings.yamlPrefix;
-    const files = this.app.vault.getMarkdownFiles().filter((f) => this.fileInAnyBlogFolder(f));
-    let changed = 0;
-    for (const file of files) {
-      try {
-        const before = await this.app.vault.read(file);
-        const split = splitFrontmatter(before);
-        if (!split)
-          continue;
-        let fmObj;
-        try {
-          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
-        } catch (e) {
-          continue;
-        }
-        if (!fmObj || typeof fmObj !== "object")
-          continue;
-        const updates = {};
-        const removals = [];
-        const raw = fmObj[`${prefix}blog`];
-        const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
-        if (tokens.length) {
-          const seen = /* @__PURE__ */ new Set();
-          const out = [];
-          for (const t of tokens) {
-            const b = this.settings.blogs.find((bl) => this.blogMatchesToken(bl, t));
-            const key = b ? this.blogDomainKey(b) : t;
-            const lk = key.toLowerCase();
-            if (!seen.has(lk)) {
-              seen.add(lk);
-              out.push(key);
-            }
-          }
-          const want = `[${out.map((k) => `"${k}"`).join(", ")}]`;
-          const current = `[${tokens.map((t) => `"${t}"`).join(", ")}]`;
-          if (want !== current)
-            updates[`${prefix}blog`] = want;
-        }
-        for (const blog of this.settings.blogs) {
-          const domSuffix = this.blogKeyFor(blog);
-          const srcSuffixes = /* @__PURE__ */ new Set([this.blogKeySuffix(blog.name), ...(blog.aliases || []).map((a) => this.blogKeySuffix(a))]);
-          srcSuffixes.delete(domSuffix);
-          for (const srcSuffix of srcSuffixes) {
-            for (const base of ["id", "public_url"]) {
-              const oldKey = `${prefix}${base}_${srcSuffix}`;
-              const newKey = `${prefix}${base}_${domSuffix}`;
-              const val = fmObj[oldKey];
-              if (newKey in fmObj) {
-                if (oldKey in fmObj)
-                  removals.push(oldKey);
-              } else if (typeof val === "string" && val) {
-                updates[newKey] = val;
-                removals.push(oldKey);
-              }
-            }
-          }
-        }
-        if (Object.keys(updates).length === 0 && removals.length === 0)
-          continue;
-        let content = before;
-        if (Object.keys(updates).length)
-          content = upsertFrontmatterKeys(content, updates);
-        if (removals.length)
-          content = removeFrontmatterKeys(content, removals);
-        if (content !== before) {
-          await this.app.vault.modify(file, content);
-          changed++;
-        }
-      } catch (e) {
-        console.error("[Ghost] normalize failed for", file.path, e);
-      }
-    }
-    new import_obsidian10.Notice(`Normalized blog references in ${changed} note${changed === 1 ? "" : "s"}`);
-  }
-  /** A blog was renamed from `oldName`. Rewrite existing notes so their references
-   *  follow it: g_blog tokens matching the old name become the new domain key, and
-   *  per-blog id/url keys move from the old name's suffix to the new domain suffix. */
-  async migrateBlogRename(oldName, blog) {
-    const prefix = this.settings.yamlPrefix;
-    const oldTok = oldName.trim().toLowerCase();
-    const oldSuffix = this.blogKeySuffix(oldName);
-    const newKey = this.blogDomainKey(blog);
-    const newSuffix = this.blogKeyFor(blog);
-    if (!oldTok)
-      return;
-    const files = this.app.vault.getMarkdownFiles().filter((f) => this.fileInAnyBlogFolder(f));
-    let changed = 0;
-    for (const file of files) {
-      try {
-        const before = await this.app.vault.read(file);
-        const split = splitFrontmatter(before);
-        if (!split)
-          continue;
-        let fmObj;
-        try {
-          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
-        } catch (e) {
-          continue;
-        }
-        if (!fmObj || typeof fmObj !== "object")
-          continue;
-        const updates = {};
-        const removals = [];
-        const raw = fmObj[`${prefix}blog`];
-        const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
-        if (tokens.some((t) => t.toLowerCase() === oldTok)) {
-          const seen = /* @__PURE__ */ new Set();
-          const out = [];
-          for (const t of tokens) {
-            const k = t.toLowerCase() === oldTok ? newKey : t;
-            const lk = k.toLowerCase();
-            if (!seen.has(lk)) {
-              seen.add(lk);
-              out.push(k);
-            }
-          }
-          updates[`${prefix}blog`] = `[${out.map((k) => `"${k}"`).join(", ")}]`;
-        }
-        if (oldSuffix !== newSuffix) {
-          for (const base of ["id", "public_url"]) {
-            const oldKey = `${prefix}${base}_${oldSuffix}`;
-            const newKey2 = `${prefix}${base}_${newSuffix}`;
-            const val = fmObj[oldKey];
-            if (newKey2 in fmObj) {
-              if (oldKey in fmObj)
-                removals.push(oldKey);
-            } else if (typeof val === "string" && val) {
-              updates[newKey2] = val;
-              removals.push(oldKey);
-            }
-          }
-        }
-        if (Object.keys(updates).length === 0 && removals.length === 0)
-          continue;
-        let content = before;
-        if (Object.keys(updates).length)
-          content = upsertFrontmatterKeys(content, updates);
-        if (removals.length)
-          content = removeFrontmatterKeys(content, removals);
-        if (content !== before) {
-          await this.app.vault.modify(file, content);
-          changed++;
-        }
-      } catch (e) {
-        console.error("[Ghost] rename migration failed for", file.path, e);
-      }
-    }
-    if (changed)
-      new import_obsidian10.Notice(`Updated ${changed} note${changed === 1 ? "" : "s"} for renamed blog "${blog.name}"`);
   }
   /** Sync every note across all blog folders, each to its own blog(s). */
   async syncAllRouted() {
@@ -3873,13 +3445,14 @@ ${bodyMarkdown}`;
       { heading: "Publish this note to\u2026", confirmLabel: "Set" },
       async (chosen) => {
         const prefix = this.settings.yamlPrefix;
-        const yaml = this.blogPropertyYaml(chosen);
+        const names = chosen.map((b) => b.name);
+        const yaml = `[${names.map((n) => `"${n}"`).join(", ")}]`;
         let content = await this.app.vault.read(file);
         content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
         await this.app.vault.modify(file, content);
         this.settings.defaultBlogId = chosen[chosen.length - 1].id;
         await this.saveSettings();
-        new import_obsidian10.Notice(`Note will publish to: ${chosen.map((b) => b.name).join(", ")}`);
+        new import_obsidian10.Notice(`Note will publish to: ${names.join(", ")}`);
       }
     ).open();
   }
@@ -3923,7 +3496,7 @@ ${bodyMarkdown}`;
       new import_obsidian10.Notice(`Import from ${blog.name} failed: ${e.message}`);
     }
   }
-  /** Write one Ghost post as a note in a folder, tagged with its blog. */
+  /** Write one Ghost post as a note in a folder, tagged with its blog (per-blog keys). */
   async writePostAsNoteInFolder(post, editorUrl, folder, blog) {
     var _a, _b, _c, _d, _e, _f;
     const prefix = this.settings.yamlPrefix;
@@ -4051,7 +3624,7 @@ ${body}`;
       };
       const selectedBlogs = form.blogIds.map((id) => this.settings.blogs.find((b) => b.id === id)).filter((b) => !!b);
       if (selectedBlogs.length > 0) {
-        ghostFields.blog = this.blogPropertyYaml(selectedBlogs);
+        ghostFields.blog = `[${selectedBlogs.map((b) => `"${b.name}"`).join(", ")}]`;
       }
       updated = upsertGhostMetadata(updated, ghostFields, prefix);
       await this.app.vault.modify(file, updated);
@@ -4142,16 +3715,12 @@ ${body}`;
         const bodyMarkdown = htmlToMarkdown((_f = post.html) != null ? _f : "");
         const parsed = splitFrontmatter(content);
         const title = post.title || "Untitled Post";
-        if (parsed) {
-          content = joinFrontmatter(parsed.raw, `
+        content = parsed ? joinFrontmatter(parsed.raw, `
 # ${title}
 
-${bodyMarkdown}`);
-        } else {
-          content = `# ${title}
+${bodyMarkdown}`) : `# ${title}
 
 ${bodyMarkdown}`;
-        }
         await this.app.vault.modify(file, content);
         await this.ensureInFolder(file, targetFolder);
         new import_obsidian10.Notice(`Linked and updated note from Ghost: "${title}"${blog ? ` (${blog.name})` : ""}`);
@@ -4329,6 +3898,460 @@ ${bodyMarkdown}`;
       await applyDate();
     }
   }
+  // ─── Archive (move-on-delete instead of trash) ───────────────────────────
+  archiveName() {
+    return (this.settings.archiveFolderName || "Archive").trim() || "Archive";
+  }
+  /** True if a path is inside any blog's archive subfolder. */
+  isArchivePath(path) {
+    const name = this.archiveName();
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
+    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    return folders.some((f) => f && path.startsWith(`${f}/${name}/`));
+  }
+  /** Where a deleted note is archived: <its blog folder>/<archiveName>/<relative path>. */
+  archiveTargetFor(notePath) {
+    const name = this.archiveName();
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
+    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    let base = "";
+    for (const f of folders) {
+      if (f && (notePath === f || notePath.startsWith(f + "/")) && f.length > base.length)
+        base = f;
+    }
+    if (!base)
+      base = notePath.split("/").slice(0, -1).join("/");
+    const rel = notePath.startsWith(base + "/") ? notePath.slice(base.length + 1) : notePath.split("/").pop();
+    return (0, import_obsidian10.normalizePath)(`${base}/${name}/${rel}`);
+  }
+  /** Move a note into its blog's archive subfolder (instead of trashing it),
+   *  preserving its frontmatter and adding an archive record. */
+  async archiveNote(file) {
+    let dest = this.archiveTargetFor(file.path);
+    const parent = dest.split("/").slice(0, -1).join("/");
+    if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
+      try {
+        await this.app.vault.createFolder(parent);
+      } catch (e) {
+      }
+    }
+    if (this.app.vault.getAbstractFileByPath(dest)) {
+      const slash = dest.lastIndexOf("/");
+      const dot = dest.lastIndexOf(".");
+      const stamp = Date.now();
+      dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
+    }
+    const originalPath = file.path;
+    await this.app.fileManager.renameFile(file, dest);
+    const moved = this.app.vault.getAbstractFileByPath(dest);
+    if (moved instanceof import_obsidian10.TFile) {
+      try {
+        const prefix = this.settings.yamlPrefix;
+        const content = await this.app.vault.read(moved);
+        const updated = upsertFrontmatterKeys(content, {
+          [`${prefix}archived`]: "true",
+          [`${prefix}archived_at`]: `"${(/* @__PURE__ */ new Date()).toISOString()}"`,
+          [`${prefix}archived_from`]: `"${originalPath}"`,
+          [`${prefix}no_sync`]: "true"
+        });
+        if (updated !== content)
+          await this.app.vault.modify(moved, updated);
+      } catch (e) {
+        console.error("[Ghost] archive metadata stamp failed:", e);
+      }
+    }
+  }
+  /** True if the file sits inside ANY blog's folder (or the primary sync folder), excluding archives. */
+  fileInAnyBlogFolder(file) {
+    if (this.isArchivePath(file.path))
+      return false;
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
+    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    return folders.some((f) => f && (file.path === f || file.path.startsWith(f + "/")));
+  }
+  // ─── Ghost index + bulk delete ───────────────────────────────────────────
+  /** Resolve the Ghost post id for each blog this note has one stored for. */
+  resolveGhostJobs(fmObj) {
+    const jobs = [];
+    for (const blog of this.settings.blogs) {
+      const id = this.readBlogId(fmObj, blog);
+      if (id)
+        jobs.push({ blog, id });
+    }
+    return jobs;
+  }
+  /** Build a bulk-delete item list for a file from its (live) frontmatter. */
+  bulkItemsForFile(file) {
+    var _a;
+    const prefix = this.settings.yamlPrefix;
+    const cache = this.app.metadataCache.getFileCache(file);
+    const fmObj = (_a = cache == null ? void 0 : cache.frontmatter) != null ? _a : {};
+    const pub = fmObj[`${prefix}published`];
+    const published = pub === true || pub === "true";
+    return this.resolveGhostJobs(fmObj).map((j) => ({
+      blogId: j.blog.id,
+      blogName: j.blog.name,
+      ghostId: j.id,
+      title: file.basename,
+      published,
+      path: file.path
+    }));
+  }
+  /** Maintain the in-memory index (path → linked Ghost posts) used to know what
+   *  to offer for deletion AFTER a note/folder is gone (its cache is purged). */
+  indexFile(file) {
+    if (!this.ghostIndex)
+      this.ghostIndex = /* @__PURE__ */ new Map();
+    if (!(file instanceof import_obsidian10.TFile) || file.extension !== "md")
+      return;
+    if (!this.fileInAnyBlogFolder(file)) {
+      this.ghostIndex.delete(file.path);
+      return;
+    }
+    const items = this.bulkItemsForFile(file);
+    if (items.length === 0)
+      this.ghostIndex.delete(file.path);
+    else
+      this.ghostIndex.set(file.path, items);
+  }
+  rebuildGhostIndex() {
+    this.ghostIndex = /* @__PURE__ */ new Map();
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (this.fileInAnyBlogFolder(f))
+        this.indexFile(f);
+    }
+  }
+  scheduleDeleteBatch() {
+    if (this.deleteBatchTimer)
+      window.clearTimeout(this.deleteBatchTimer);
+    this.deleteBatchTimer = window.setTimeout(() => {
+      void this.processDeleteBatch();
+    }, 400);
+  }
+  /** A folder (with its notes) was just deleted locally. Offer the bulk-delete
+   *  workflow for the remote posts those notes were linked to. Never auto-deletes. */
+  async processDeleteBatch() {
+    this.deleteBatchTimer = void 0;
+    const folders = this.pendingDeletedFolders.splice(0).map((p) => p.replace(/\/+$/, ""));
+    if (folders.length === 0 || !this.ghostIndex)
+      return;
+    const items = [];
+    for (const [path, entries] of this.ghostIndex) {
+      if (!folders.some((fp) => path === fp || path.startsWith(fp + "/")))
+        continue;
+      for (const e of entries)
+        items.push({ ...e, path });
+      this.ghostIndex.delete(path);
+    }
+    if (items.length === 0)
+      return;
+    new BulkDeleteModal(this.app, this, {
+      heading: `Folder deleted \u2014 delete ${items.length} linked Ghost post${items.length === 1 ? "" : "s"}?`,
+      subtext: "These notes were just removed locally. Choose which of their Ghost posts to also delete. Nothing is deleted until you confirm.",
+      deleteLocal: false,
+      items
+    }).open();
+  }
+  /** Delete one remote post on its blog. */
+  async deleteOneRemote(blogId, ghostId) {
+    const blog = this.settings.blogs.find((b) => b.id === blogId);
+    if (!blog)
+      throw new Error("Unknown blog for delete");
+    await this.getClientForBlog(blog).deletePost(ghostId);
+  }
+  /** Run the confirmed bulk delete: optional per-post confirm, Stop aborts the rest. */
+  async executeBulkDelete(items, deleteLocal) {
+    let ok = 0, fail = 0, skipped = 0;
+    for (const it of items) {
+      if (this.settings.confirmEachRemoteDelete) {
+        const decision = await new Promise((resolve) => {
+          new DeleteConfirmModal(this.app, it.title, it.blogName, resolve).open();
+        });
+        if (decision === "stop")
+          break;
+        if (decision === "skip") {
+          skipped++;
+          continue;
+        }
+      }
+      try {
+        await this.deleteOneRemote(it.blogId, it.ghostId);
+        ok++;
+      } catch (e) {
+        fail++;
+        console.error("[Ghost] bulk delete failed:", e);
+        continue;
+      }
+      if (deleteLocal && it.path) {
+        const f = this.app.vault.getAbstractFileByPath(it.path);
+        if (f instanceof import_obsidian10.TFile) {
+          try {
+            if (this.settings.archiveDeletedNotes)
+              await this.archiveNote(f);
+            else
+              await this.app.fileManager.trashFile(f);
+          } catch (e) {
+            console.error("[Ghost] local note archive/delete failed:", e);
+          }
+        }
+      }
+      if (it.path && this.ghostIndex)
+        this.ghostIndex.delete(it.path);
+    }
+    new import_obsidian10.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}`);
+  }
+  /** On-demand bulk delete: pick blog(s), list their linked posts (all checked). */
+  openBulkDeleteCommand() {
+    if (this.settings.blogs.length === 0) {
+      new import_obsidian10.Notice("No blogs configured.");
+      return;
+    }
+    const def = this.defaultBlog();
+    new SelectBlogsModal(
+      this.app,
+      this.settings.blogs,
+      def ? [def.id] : [],
+      { heading: "Bulk delete \u2014 choose blog(s)", confirmLabel: "Next" },
+      (chosen) => {
+        const chosenIds = new Set(chosen.map((b) => b.id));
+        const folders = chosen.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
+        const items = [];
+        for (const f of this.app.vault.getMarkdownFiles()) {
+          if (this.isArchivePath(f.path))
+            continue;
+          if (!folders.some((fp) => f.path === fp || f.path.startsWith(fp + "/")))
+            continue;
+          for (const it of this.bulkItemsForFile(f)) {
+            if (chosenIds.has(it.blogId))
+              items.push(it);
+          }
+        }
+        if (items.length === 0) {
+          new import_obsidian10.Notice("No linked ghost posts found in the selected folder(s).");
+          return;
+        }
+        new BulkDeleteModal(this.app, this, {
+          heading: `Delete ${items.length} note${items.length === 1 ? "" : "s"} + their Ghost posts?`,
+          subtext: "Unchecked items are left alone. For checked items, both the local note and the remote post are deleted.",
+          deleteLocal: true,
+          items
+        }).open();
+      }
+    ).open();
+  }
+  // ─── Orphaned posts (blogs removed from g_blog) ──────────────────────────
+  /** Posts the note still has on blogs NOT named in g_blog (stored id, no longer targeted). */
+  orphanedJobsForFile(file) {
+    var _a, _b;
+    const fmObj = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
+    const namedIds = new Set(this.resolveBlogsForFile(file).map((b) => b.id));
+    return this.resolveGhostJobs(fmObj).filter((j) => !namedIds.has(j.blog.id));
+  }
+  /** Frontmatter keys that hold the stored id/URL for one blog on this note, and the public URL. */
+  storedKeysForBlog(file, blog) {
+    var _a, _b;
+    const fmObj = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
+    return { keys: this.allBlogKeyNames(blog), url: this.readBlogPublicUrl(fmObj, blog) };
+  }
+  /** Warn about each orphaned post in turn; let the user delete it on Ghost or keep both. */
+  promptOrphanedPosts(file, orphans) {
+    const job = orphans[0];
+    if (!job)
+      return;
+    const { url } = this.storedKeysForBlog(file, job.blog);
+    new OrphanPostModal(this.app, job.blog.name, url, (decision) => {
+      void (async () => {
+        try {
+          if (decision === "delete")
+            await this.deleteOrphanPost(file, job.blog, job.id);
+          else if (decision === "keep")
+            await this.keepOrphanInBoth(file, job.blog);
+        } catch (e) {
+          new import_obsidian10.Notice(`Failed: ${e.message}`);
+        }
+        this.promptOrphanedPosts(file, orphans.slice(1));
+      })();
+    }).open();
+  }
+  /** Delete an orphaned post on Ghost and strip its id/URL keys from the note. */
+  async deleteOrphanPost(file, blog, ghostId) {
+    await this.deleteOneRemote(blog.id, ghostId);
+    const { keys } = this.storedKeysForBlog(file, blog);
+    let content = await this.app.vault.read(file);
+    content = removeFrontmatterKeys(content, keys);
+    await this.app.vault.modify(file, content);
+    new import_obsidian10.Notice(`Deleted orphaned post on ${blog.name}`);
+  }
+  /** Re-add an orphaned blog to g_blog and sync it now, so the note publishes to both. */
+  async keepOrphanInBoth(file, blog) {
+    const named = this.resolveBlogsForFile(file);
+    const all = named.some((b) => b.id === blog.id) ? named : [...named, blog];
+    await this.ensureBlogProperty(file, all);
+    await this.syncFileToBlogs(file, all);
+    new import_obsidian10.Notice(`Kept "${blog.name}" \u2014 this note now publishes to both`);
+  }
+  /** Write g_blog so it lists exactly `blogs` (used when keeping an orphan in both). */
+  async ensureBlogProperty(file, blogs) {
+    if (blogs.length === 0)
+      return;
+    const prefix = this.settings.yamlPrefix;
+    const yaml = this.blogPropertyYaml(blogs);
+    let content = await this.app.vault.read(file);
+    content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
+    await this.app.vault.modify(file, content);
+  }
+  // ─── Domain-key normalization + rename migration ─────────────────────────
+  /** One-shot upgrade of existing notes to domain-keyed blog references. Idempotent. */
+  async normalizeBlogReferences() {
+    var _a;
+    const prefix = this.settings.yamlPrefix;
+    const files = this.app.vault.getMarkdownFiles().filter((f) => this.fileInAnyBlogFolder(f));
+    let changed = 0;
+    for (const file of files) {
+      try {
+        const before = await this.app.vault.read(file);
+        const split = splitFrontmatter(before);
+        if (!split)
+          continue;
+        let fmObj;
+        try {
+          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
+        } catch (e) {
+          continue;
+        }
+        if (!fmObj || typeof fmObj !== "object")
+          continue;
+        const updates = {};
+        const removals = [];
+        const raw = fmObj[`${prefix}blog`];
+        const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
+        if (tokens.length) {
+          const seen = /* @__PURE__ */ new Set();
+          const out = [];
+          for (const t of tokens) {
+            const b = this.settings.blogs.find((bl) => this.blogMatchesToken(bl, t));
+            const key = b ? this.blogDomainKey(b) : t;
+            const lk = key.toLowerCase();
+            if (!seen.has(lk)) {
+              seen.add(lk);
+              out.push(key);
+            }
+          }
+          const want = `[${out.map((k) => `"${k}"`).join(", ")}]`;
+          const current = `[${tokens.map((t) => `"${t}"`).join(", ")}]`;
+          if (want !== current)
+            updates[`${prefix}blog`] = want;
+        }
+        for (const blog of this.settings.blogs) {
+          const domSuffix = this.blogKeyFor(blog);
+          const srcSuffixes = /* @__PURE__ */ new Set([this.blogKeySuffix(blog.name), ...((_a = blog.aliases) != null ? _a : []).map((a) => this.blogKeySuffix(a))]);
+          srcSuffixes.delete(domSuffix);
+          for (const srcSuffix of srcSuffixes) {
+            for (const base of ["id", "public_url"]) {
+              const oldKey = `${prefix}${base}_${srcSuffix}`;
+              const newKey = `${prefix}${base}_${domSuffix}`;
+              const val = fmObj[oldKey];
+              if (newKey in fmObj) {
+                if (oldKey in fmObj)
+                  removals.push(oldKey);
+              } else if (typeof val === "string" && val) {
+                updates[newKey] = val;
+                removals.push(oldKey);
+              }
+            }
+          }
+        }
+        if (Object.keys(updates).length === 0 && removals.length === 0)
+          continue;
+        let content = before;
+        if (Object.keys(updates).length)
+          content = upsertFrontmatterKeys(content, updates);
+        if (removals.length)
+          content = removeFrontmatterKeys(content, removals);
+        if (content !== before) {
+          await this.app.vault.modify(file, content);
+          changed++;
+        }
+      } catch (e) {
+        console.error("[Ghost] normalize failed for", file.path, e);
+      }
+    }
+    new import_obsidian10.Notice(`Normalized blog references in ${changed} note${changed === 1 ? "" : "s"}`);
+  }
+  /** A blog was renamed from `oldName`. Rewrite existing notes so their references follow it. */
+  async migrateBlogRename(oldName, blog) {
+    const prefix = this.settings.yamlPrefix;
+    const oldTok = oldName.trim().toLowerCase();
+    const oldSuffix = this.blogKeySuffix(oldName);
+    const newKey = this.blogDomainKey(blog);
+    const newSuffix = this.blogKeyFor(blog);
+    if (!oldTok)
+      return;
+    const files = this.app.vault.getMarkdownFiles().filter((f) => this.fileInAnyBlogFolder(f));
+    let changed = 0;
+    for (const file of files) {
+      try {
+        const before = await this.app.vault.read(file);
+        const split = splitFrontmatter(before);
+        if (!split)
+          continue;
+        let fmObj;
+        try {
+          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
+        } catch (e) {
+          continue;
+        }
+        if (!fmObj || typeof fmObj !== "object")
+          continue;
+        const updates = {};
+        const removals = [];
+        const raw = fmObj[`${prefix}blog`];
+        const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
+        if (tokens.some((t) => t.toLowerCase() === oldTok)) {
+          const seen = /* @__PURE__ */ new Set();
+          const out = [];
+          for (const t of tokens) {
+            const k = t.toLowerCase() === oldTok ? newKey : t;
+            const lk = k.toLowerCase();
+            if (!seen.has(lk)) {
+              seen.add(lk);
+              out.push(k);
+            }
+          }
+          updates[`${prefix}blog`] = `[${out.map((k) => `"${k}"`).join(", ")}]`;
+        }
+        if (oldSuffix !== newSuffix) {
+          for (const base of ["id", "public_url"]) {
+            const oldKey = `${prefix}${base}_${oldSuffix}`;
+            const newKey2 = `${prefix}${base}_${newSuffix}`;
+            const val = fmObj[oldKey];
+            if (newKey2 in fmObj) {
+              if (oldKey in fmObj)
+                removals.push(oldKey);
+            } else if (typeof val === "string" && val) {
+              updates[newKey2] = val;
+              removals.push(oldKey);
+            }
+          }
+        }
+        if (Object.keys(updates).length === 0 && removals.length === 0)
+          continue;
+        let content = before;
+        if (Object.keys(updates).length)
+          content = upsertFrontmatterKeys(content, updates);
+        if (removals.length)
+          content = removeFrontmatterKeys(content, removals);
+        if (content !== before) {
+          await this.app.vault.modify(file, content);
+          changed++;
+        }
+      } catch (e) {
+        console.error("[Ghost] rename migration failed for", file.path, e);
+      }
+    }
+    if (changed)
+      new import_obsidian10.Notice(`Updated ${changed} note${changed === 1 ? "" : "s"} for renamed blog "${blog.name}"`);
+  }
 };
 var ConfirmScheduleModal = class extends import_obsidian10.Modal {
   constructor(app, currentDate, newDate, onConfirm) {
@@ -4367,14 +4390,14 @@ var DeleteConfirmModal = class extends import_obsidian10.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h3", { text: "Delete post on Ghost?" });
+    contentEl.createEl("h3", { text: "Delete post on ghost?" });
     const p1 = contentEl.createEl("p");
     p1.createSpan({ text: "Post: " });
     p1.createEl("strong", { text: this.postTitle });
     const p2 = contentEl.createEl("p");
     p2.createSpan({ text: "Blog: " });
     p2.createEl("strong", { text: this.blogName });
-    contentEl.createEl("p", { text: "This permanently deletes the post on Ghost and cannot be undone." });
+    contentEl.createEl("p", { text: "This permanently deletes the post on ghost and cannot be undone." });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian10.ButtonComponent(row).setButtonText("Delete").setWarning().onClick(() => this.finish("delete"));
     new import_obsidian10.ButtonComponent(row).setButtonText("Skip").onClick(() => this.finish("skip"));
@@ -4441,7 +4464,7 @@ var OrphanPostModal = class extends import_obsidian10.Modal {
       a.setAttr("target", "_blank");
       a.setAttr("rel", "noopener");
     }
-    contentEl.createEl("p", { text: "Delete it on Ghost, or keep it \u2014 keeping re-adds the blog to g_blog and the note will publish to both again." });
+    contentEl.createEl("p", { text: "Delete it on ghost, or keep it \u2014 keeping re-adds the blog to g_blog and the note will publish to both again." });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian10.ButtonComponent(row).setButtonText("Delete on ghost").setWarning().onClick(() => this.finish("delete"));
     new import_obsidian10.ButtonComponent(row).setButtonText("Keep in both").onClick(() => this.finish("keep"));
@@ -4472,14 +4495,14 @@ var BulkDeleteModal = class extends import_obsidian10.Modal {
       contentEl.createEl("p", { text: this.opts.subtext });
     const list = contentEl.createDiv({ cls: "omnighost-bulk-list" });
     this.opts.items.forEach((it, i) => {
-      const row = list.createEl("label", { cls: "omnighost-bulk-row" });
-      const cb = row.createEl("input", { attr: { type: "checkbox" } });
+      const row2 = list.createEl("label", { cls: "omnighost-bulk-row" });
+      const cb = row2.createEl("input", { attr: { type: "checkbox" } });
       cb.checked = true;
       cb.onchange = () => {
         this.checked[i] = cb.checked;
       };
-      row.createSpan({ text: ` ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
-      row.createEl("br");
+      row2.createSpan({ text: ` ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
+      row2.createEl("br");
     });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian10.ButtonComponent(row).setButtonText("Delete selected").setWarning().onClick(() => this.submit());
@@ -4556,17 +4579,19 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           blog.name = v.trim();
           await plugin.saveSettings();
         });
-        t.inputEl.addEventListener("blur", async () => {
-          const prev = originalName;
-          if (blog.name && prev && blog.name !== prev) {
-            originalName = blog.name;
-            blog.aliases = blog.aliases || [];
-            const lp = prev.trim().toLowerCase();
-            if (lp && lp !== blog.name.trim().toLowerCase() && !blog.aliases.includes(lp))
-              blog.aliases.push(lp);
-            await plugin.saveSettings();
-            await plugin.migrateBlogRename(prev, blog);
-          }
+        t.inputEl.addEventListener("blur", () => {
+          void (async () => {
+            const prev = originalName;
+            if (blog.name && prev && blog.name !== prev) {
+              originalName = blog.name;
+              blog.aliases = blog.aliases || [];
+              const lp = prev.trim().toLowerCase();
+              if (lp && lp !== blog.name.trim().toLowerCase() && !blog.aliases.includes(lp))
+                blog.aliases.push(lp);
+              await plugin.saveSettings();
+              await plugin.migrateBlogRename(prev, blog);
+            }
+          })();
         });
       });
       new import_obsidian10.Setting(containerEl).setName("Site address").addText((t) => t.setPlaceholder("https://yourblog.com").setValue(blog.url).onChange(async (v) => {
@@ -4655,7 +4680,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     });
     new import_obsidian10.Setting(containerEl).addButton((b) => b.setButtonText("Add blog").setCta().onClick(async () => {
       const id = plugin.genBlogId();
-      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: "Ghost Posts", syncEnabled: true };
+      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: "Ghost Posts" };
       plugin.settings.blogs.push(blog);
       if (!plugin.settings.defaultBlogId)
         plugin.settings.defaultBlogId = blog.id;
@@ -4684,20 +4709,20 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
     new import_obsidian10.Setting(containerEl).setHeading().setName("Deletion");
-    new import_obsidian10.Setting(containerEl).setDesc("Deletion is never automatic. Run the command \u201cBulk delete posts (local notes + ghost)\u201d to pick a blog, review a checklist of its linked posts, and confirm.");
-    new import_obsidian10.Setting(containerEl).setName("Prompt on folder delete").setDesc("When you delete a folder of synced notes, pop up the same bulk-delete checklist for their Ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.").addToggle((toggle) => toggle.setValue(this.plugin.settings.promptDeleteOnFolderDelete).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setDesc("Deletion is never automatic. Run the command \u201Cbulk delete posts (local notes + ghost)\u201D to pick a blog, review a checklist of its linked posts, and confirm.");
+    new import_obsidian10.Setting(containerEl).setName("Prompt on folder delete").setDesc("When you delete a folder of synced notes, pop up the same bulk-delete checklist for their ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.").addToggle((toggle) => toggle.setValue(this.plugin.settings.promptDeleteOnFolderDelete).onChange(async (value) => {
       this.plugin.settings.promptDeleteOnFolderDelete = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Confirm each remote delete").setDesc("During a bulk delete, also show a per-post confirmation (post + blog name) with Delete / Skip / Stop. The final bulk confirmation always shows regardless.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmEachRemoteDelete).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Confirm each remote delete").setDesc("During a bulk delete, also show a per-post confirmation (post + blog name) with delete / skip / stop. The final bulk confirmation always shows regardless.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmEachRemoteDelete).onChange(async (value) => {
       this.plugin.settings.confirmEachRemoteDelete = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Archive deleted notes").setDesc("When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the Ghost post is still deleted). Archived notes are never re-synced.").addToggle((toggle) => toggle.setValue(this.plugin.settings.archiveDeletedNotes).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Archive deleted notes").setDesc("When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the ghost post is still deleted). Archived notes are never re-synced.").addToggle((toggle) => toggle.setValue(this.plugin.settings.archiveDeletedNotes).onChange(async (value) => {
       this.plugin.settings.archiveDeletedNotes = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Archive subfolder name").setDesc("Name of the archive subfolder created inside each blog folder (default: Archive).").addText((text) => text.setPlaceholder("Archive").setValue(this.plugin.settings.archiveFolderName).onChange(async (value) => {
+    new import_obsidian10.Setting(containerEl).setName("Archive subfolder name").setDesc("Name of the archive subfolder created inside each blog folder (default: archive).").addText((text) => text.setPlaceholder("Archive").setValue(this.plugin.settings.archiveFolderName).onChange(async (value) => {
       this.plugin.settings.archiveFolderName = value.trim() || "Archive";
       await this.plugin.saveSettings();
     }));
