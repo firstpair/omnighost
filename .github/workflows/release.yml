@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+"
+      - "*.*.*"
 
 permissions:
   contents: write
@@ -50,7 +50,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.ref_name }}
         run: |
+          CODENAME=$(awk -F'|' -v tag="$TAG" '$3 ~ " " tag " " { gsub(/[* ]/, "", $2); print $2; exit }' RELEASES.md)
+          TITLE="${CODENAME:+$CODENAME }$TAG"
+          ASSETS=(main.js manifest.json styles.css)
+          for asset in docs/book/dist/obsidian.epub docs/book/dist/obsidian.pdf; do
+            if [ -f "$asset" ]; then
+              ASSETS+=("$asset")
+            fi
+          done
+
           gh release create "$TAG" \
-            --title "$TAG" \
+            --title "$TITLE" \
             --generate-notes \
-            main.js manifest.json styles.css
+            "${ASSETS[@]}"
