@@ -66,6 +66,7 @@ regex_escape() {
 expected_title_pattern="$(regex_escape "$expected_title")"
 visible_title_pattern="$(regex_escape "$visible_title")"
 expected_stem="${expected_title% (*}"
+expected_suffix="${expected_stem##*-}"
 stable_epub="$dist_dir/$expected_stem.epub"
 version_marker="$dist_dir/VERSION.md"
 
@@ -113,16 +114,16 @@ if [[ ! -f "$version_marker" ]]; then
 fi
 
 stem_pattern="$(regex_escape "$expected_stem")"
-require_pattern "^kindle_name: $expected_title_pattern$" "$version_marker" "VERSION.md missing Kindle name"
 require_pattern '^version_stamp: [0-9]+\.[0-9]+\.[0-9]+-[0-9a-z]+$' "$version_marker" "VERSION.md missing version stamp"
 require_pattern '^built_at: [0-9]{4}-[0-9]{2}-[0-9]{2}$' "$version_marker" "VERSION.md missing build date"
-require_pattern "^epub_file: $(regex_escape "$(basename "$stable_epub")")$" "$version_marker" "VERSION.md missing stable EPUB filename"
-require_pattern "^pdf_file: ${stem_pattern}\.pdf$" "$version_marker" "VERSION.md missing stable PDF filename"
-require_pattern "^epub_link: ${stem_pattern} \(.+\)\.epub$" "$version_marker" "VERSION.md missing versioned EPUB link"
-require_pattern "^pdf_link: ${stem_pattern} \(.+\)\.pdf$" "$version_marker" "VERSION.md missing versioned PDF link"
+require_pattern "^kindle_name_${expected_suffix}: $expected_title_pattern$" "$version_marker" "VERSION.md missing $expected_suffix Kindle name"
+require_pattern "^epub_file_${expected_suffix}: $(regex_escape "$(basename "$stable_epub")")$" "$version_marker" "VERSION.md missing $expected_suffix stable EPUB filename"
+require_pattern "^pdf_file_${expected_suffix}: ${stem_pattern}\.pdf$" "$version_marker" "VERSION.md missing $expected_suffix stable PDF filename"
+require_pattern "^epub_link_${expected_suffix}: ${stem_pattern} \(.+\)\.epub$" "$version_marker" "VERSION.md missing $expected_suffix versioned EPUB link"
+require_pattern "^pdf_link_${expected_suffix}: ${stem_pattern} \(.+\)\.pdf$" "$version_marker" "VERSION.md missing $expected_suffix versioned PDF link"
 
-epub_link="$(awk -F': ' '/^epub_link:/ { print $2 }' "$version_marker")"
-pdf_link="$(awk -F': ' '/^pdf_link:/ { print $2 }' "$version_marker")"
+epub_link="$(awk -F': ' -v key="epub_link_${expected_suffix}" '$1 == key { print $2 }' "$version_marker")"
+pdf_link="$(awk -F': ' -v key="pdf_link_${expected_suffix}" '$1 == key { print $2 }' "$version_marker")"
 [[ -L "$dist_dir/$epub_link" ]] || { echo "EPUB metadata check failed: missing symlink $epub_link" >&2; exit 1; }
 [[ -L "$dist_dir/$pdf_link" ]] || { echo "EPUB metadata check failed: missing symlink $pdf_link" >&2; exit 1; }
 [[ "$(readlink "$dist_dir/$epub_link")" == "$(basename "$stable_epub")" ]] || { echo "EPUB metadata check failed: EPUB link does not target stable EPUB" >&2; exit 1; }

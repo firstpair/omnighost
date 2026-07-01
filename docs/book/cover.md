@@ -14,6 +14,37 @@
 ]
 ```
 
+```{=ms}
+.nr HM 1i
+.nr FM 1i
+.nr PO 1i
+.nr LL 6.5i
+.ds CH
+.ds CF
+.sp 2.3i
+.ps 42
+.ft B
+.ce
+Obsidian on the Go
+.ft R
+.ps 18
+.sp .7
+.ce
+A Beginner's Guide to Notes on Your Phone
+.ps 16
+.sp .35
+.ce
+and Publishing to the Web
+.ps 18
+.sp 4
+.ce
+Alexy Khrabrov
+.ps 12
+.sp .6
+.ce
+{{KINDLE_NAME}}
+```
+
 ```{=html}
 <section epub:type="titlepage" style="text-align: center; page-break-after: always; padding-top: 8em;">
   <h1 style="font-size: 3em; margin: 0 0 0.35em; text-align: center; page-break-before: auto;">Obsidian on the Go</h1>

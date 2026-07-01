@@ -11,6 +11,7 @@ with Pandoc, then updated for current Omnighost features.
 
 - `pandoc`
 - `typst`
+- `groff` with the PDF output device
 - `pdfunite` and `pdftotext` from Poppler
 - `zip`, `unzip`, and `perl`
 - Mermaid CLI `mmdc`
@@ -23,7 +24,7 @@ On this Termux machine, `mmdc` renders through
 ## Source files
 
 - `omnighost.md` — manuscript
-- `cover.md` — Typst and HTML cover blocks
+- `cover.md` — Typst, roff/ms, and HTML cover blocks
 - `metadata.yaml` — Pandoc metadata
 - `diagrams/*.mmd` — editable Mermaid sources
 - `diagrams/*.png` — rendered diagrams referenced by the book
@@ -50,10 +51,12 @@ docs/book/build.sh
 
 Outputs go to `docs/book/dist/`:
 
-- `obsidian.epub`
-- `obsidian.pdf`
+- `obsidian-typst.epub`
+- `obsidian-typst.pdf`
+- `obsidian-troff.epub`
+- `obsidian-troff.pdf`
 - `VERSION.md`
 - versioned symlinks for EPUB/PDF
-- optional `obsidian.mobi` when `ebook-convert` is installed
+- optional `obsidian-typst.mobi` and `obsidian-troff.mobi` when `ebook-convert` is installed
 
 See `docs/book/PUBLISH.md` for the full release contract and validation steps.

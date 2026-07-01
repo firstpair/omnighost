@@ -21,27 +21,36 @@ book recovered from `docs/book/dist/obsidian-0.1.0-a9ae50.epub`.
 
 Stable deliverables:
 
-- `docs/book/dist/obsidian.pdf`
-- `docs/book/dist/obsidian.epub`
+- `docs/book/dist/obsidian-typst.pdf`
+- `docs/book/dist/obsidian-typst.epub`
+- `docs/book/dist/obsidian-troff.pdf`
+- `docs/book/dist/obsidian-troff.epub`
 - `docs/book/dist/VERSION.md`
 
 Versioned delivery links are generated on each build:
 
 ```text
-docs/book/dist/obsidian (<package-version>-<short-commit>).epub -> obsidian.epub
-docs/book/dist/obsidian (<package-version>-<short-commit>).pdf  -> obsidian.pdf
+docs/book/dist/obsidian-typst (<package-version>-<short-commit>).epub -> obsidian-typst.epub
+docs/book/dist/obsidian-typst (<package-version>-<short-commit>).pdf  -> obsidian-typst.pdf
+docs/book/dist/obsidian-troff (<package-version>-<short-commit>).epub -> obsidian-troff.epub
+docs/book/dist/obsidian-troff (<package-version>-<short-commit>).pdf  -> obsidian-troff.pdf
 ```
 
 `VERSION.md` records:
 
 ```yaml
-kindle_name: obsidian (<package-version>)
 version_stamp: <package-version>-<short-commit>
 built_at: YYYY-MM-DD
-epub_file: obsidian.epub
-pdf_file: obsidian.pdf
-epub_link: obsidian (<package-version>-<short-commit>).epub
-pdf_link: obsidian (<package-version>-<short-commit>).pdf
+kindle_name_typst: obsidian-typst (<package-version>)
+epub_file_typst: obsidian-typst.epub
+pdf_file_typst: obsidian-typst.pdf
+epub_link_typst: obsidian-typst (<package-version>-<short-commit>).epub
+pdf_link_typst: obsidian-typst (<package-version>-<short-commit>).pdf
+kindle_name_troff: obsidian-troff (<package-version>)
+epub_file_troff: obsidian-troff.epub
+pdf_file_troff: obsidian-troff.pdf
+epub_link_troff: obsidian-troff (<package-version>-<short-commit>).epub
+pdf_link_troff: obsidian-troff (<package-version>-<short-commit>).pdf
 ```
 
 MOBI conversion is optional and only runs when `ebook-convert` is installed.
@@ -57,15 +66,16 @@ Obsidian on the Go
 The Kindle/catalog title is versioned:
 
 ```text
-obsidian (<package-version>)
+obsidian-typst (<package-version>)
+obsidian-troff (<package-version>)
 ```
 
 Keep those surfaces separate:
 
 - Cover, NCX, navigation title, and visible table of contents: `Obsidian on the Go`
-- OPF `dc:title` and title-sort metadata: `obsidian (<package-version>)`
-- Stable artifact names: `obsidian.epub`, `obsidian.pdf`
-- Versioned delivery links: `obsidian (<package-version>-<short-commit>).{epub,pdf}`
+- OPF `dc:title` and title-sort metadata: `obsidian-typst (<package-version>)` or `obsidian-troff (<package-version>)`
+- Stable artifact names: `obsidian-typst.{epub,pdf}` and `obsidian-troff.{epub,pdf}`
+- Versioned delivery links: `obsidian-typst (<package-version>-<short-commit>).{epub,pdf}` and `obsidian-troff (<package-version>-<short-commit>).{epub,pdf}`
 
 The version comes from root `package.json`.
 
@@ -99,31 +109,34 @@ The build script:
 2. Reads `title_stem` from `docs/book/metadata.yaml`.
 3. Renders Mermaid `.mmd` files to PNG.
 4. Writes `docs/book/dist/VERSION.md`.
-5. Renders a temporary cover with `{{KINDLE_NAME}}` replaced.
-6. Builds a standalone cover PDF.
-7. Builds the body PDF with table of contents and numbered sections.
-8. Merges cover PDF before body PDF into `docs/book/dist/obsidian.pdf`.
-9. Builds `docs/book/dist/obsidian.epub`.
-10. Repairs EPUB cover/nav ordering and Kindle-facing metadata.
-11. Creates versioned EPUB/PDF symlinks.
-12. Validates EPUB metadata and layout.
-13. Builds `obsidian.mobi` only if `ebook-convert` exists.
+5. Builds `docs/book/dist/obsidian-typst.pdf` from the Typst cover and Pandoc's Typst PDF engine.
+6. Builds `docs/book/dist/obsidian-typst.epub` with the `obsidian-typst` Kindle-facing metadata.
+7. Builds `docs/book/dist/obsidian-troff.pdf` from the roff/ms cover and Pandoc-generated roff/ms body.
+8. Builds `docs/book/dist/obsidian-troff.epub` with the `obsidian-troff` Kindle-facing metadata.
+9. Repairs EPUB cover/nav ordering and Kindle-facing metadata for both EPUBs.
+10. Creates versioned EPUB/PDF symlinks for both suffixes from `VERSION.md`.
+11. Validates EPUB metadata and layout for both EPUBs.
+12. Builds `obsidian-typst.mobi` and `obsidian-troff.mobi` only if `ebook-convert` exists.
 
 ## Required validation
 
 After a build:
 
 ```sh
-expected_title=$(awk -F': ' '/^kindle_name:/ { print $2 }' docs/book/dist/VERSION.md)
-docs/book/check_epub_metadata.sh docs/book/dist/obsidian.epub "$expected_title"
+expected_typst_title=$(awk -F': ' '/^kindle_name_typst:/ { print $2 }' docs/book/dist/VERSION.md)
+expected_troff_title=$(awk -F': ' '/^kindle_name_troff:/ { print $2 }' docs/book/dist/VERSION.md)
+docs/book/check_epub_metadata.sh docs/book/dist/obsidian-typst.epub "$expected_typst_title"
+docs/book/check_epub_metadata.sh docs/book/dist/obsidian-troff.epub "$expected_troff_title"
 git diff --check
 ```
 
 For PDF page numbering:
 
 ```sh
-pdftotext -f 1 -l 1 docs/book/dist/obsidian.pdf -
-pdftotext -f 2 -l 2 docs/book/dist/obsidian.pdf -
+pdftotext -f 1 -l 1 docs/book/dist/obsidian-typst.pdf -
+pdftotext -f 2 -l 2 docs/book/dist/obsidian-typst.pdf -
+pdftotext -f 1 -l 1 docs/book/dist/obsidian-troff.pdf -
+pdftotext -f 2 -l 2 docs/book/dist/obsidian-troff.pdf -
 ```
 
 Expected:

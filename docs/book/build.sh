@@ -29,67 +29,135 @@ title_stem="$(
 if [[ -z "$title_stem" ]]; then
   title_stem="obsidian"
 fi
+base_stem="$title_stem"
+case "$base_stem" in
+  *-typst) base_stem="${base_stem%-typst}" ;;
+  *-troff) base_stem="${base_stem%-troff}" ;;
+esac
+typst_stem="$base_stem-typst"
+troff_stem="$base_stem-troff"
 
 pubdate="$(date -u +%F)"
 githash="$(git rev-parse --short=6 HEAD 2>/dev/null || echo nogit)"
 version_stamp="$version-$githash"
-kindle_name="$title_stem ($version)"
-link_stem="$title_stem ($version_stamp)"
-
-stable_epub="docs/book/dist/$title_stem.epub"
-stable_pdf="docs/book/dist/$title_stem.pdf"
-versioned_epub="docs/book/dist/$link_stem.epub"
-versioned_pdf="docs/book/dist/$link_stem.pdf"
+kindle_name_typst="$typst_stem ($version)"
+kindle_name_troff="$troff_stem ($version)"
+link_stem_typst="$typst_stem ($version_stamp)"
+link_stem_troff="$troff_stem ($version_stamp)"
 
 docs/book/render-diagrams.sh
 
 {
-  printf 'kindle_name: %s\n' "$kindle_name"
   printf 'version_stamp: %s\n' "$version_stamp"
   printf 'built_at: %s\n' "$pubdate"
-  printf 'epub_file: %s.epub\n' "$title_stem"
-  printf 'pdf_file: %s.pdf\n' "$title_stem"
-  printf 'epub_link: %s.epub\n' "$link_stem"
-  printf 'pdf_link: %s.pdf\n' "$link_stem"
+  printf 'kindle_name_typst: %s\n' "$kindle_name_typst"
+  printf 'epub_file_typst: %s.epub\n' "$typst_stem"
+  printf 'pdf_file_typst: %s.pdf\n' "$typst_stem"
+  printf 'epub_link_typst: %s.epub\n' "$link_stem_typst"
+  printf 'pdf_link_typst: %s.pdf\n' "$link_stem_typst"
+  printf 'kindle_name_troff: %s\n' "$kindle_name_troff"
+  printf 'epub_file_troff: %s.epub\n' "$troff_stem"
+  printf 'pdf_file_troff: %s.pdf\n' "$troff_stem"
+  printf 'epub_link_troff: %s.epub\n' "$link_stem_troff"
+  printf 'pdf_link_troff: %s.pdf\n' "$link_stem_troff"
 } > docs/book/dist/VERSION.md
 
-sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$tmpdir/cover.md"
-awk '
-  /^```[{]=typst[}]/ { in_block = 1; next }
-  in_block && /^```$/ { exit }
-  in_block { print }
-' "$tmpdir/cover.md" > "$tmpdir/cover.typ"
+extract_raw_block() {
+  local format="$1"
+  local source="$2"
+  local output="$3"
 
-typst compile "$tmpdir/cover.typ" "$tmpdir/cover.pdf"
+  awk -v format="$format" '
+    $0 == "```{=" format "}" { in_block = 1; next }
+    in_block && /^```$/ { exit }
+    in_block { print }
+  ' "$source" > "$output"
+}
 
-pandoc docs/book/omnighost.md \
-  -o "$tmpdir/body.pdf" \
-  --pdf-engine=typst \
-  --toc \
-  --number-sections
+build_typst_pdf() {
+  local stem="$1"
+  local kindle_name="$2"
+  local cover_md="$tmpdir/$stem-cover.md"
+  local cover_typ="$tmpdir/$stem-cover.typ"
+  local cover_pdf="$tmpdir/$stem-cover.pdf"
+  local body_pdf="$tmpdir/$stem-body.pdf"
 
-pdfunite "$tmpdir/cover.pdf" "$tmpdir/body.pdf" "$stable_pdf"
+  sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$cover_md"
+  extract_raw_block typst "$cover_md" "$cover_typ"
+  typst compile "$cover_typ" "$cover_pdf"
 
-pandoc "$tmpdir/cover.md" docs/book/omnighost.md \
-  -o "$stable_epub" \
-  --toc \
-  --number-sections \
-  --metadata-file docs/book/metadata.yaml \
-  --metadata date="$pubdate" \
-  --css docs/book/epub.css \
-  --epub-title-page=false
+  pandoc docs/book/omnighost.md \
+    -o "$body_pdf" \
+    --pdf-engine=typst \
+    --toc \
+    --number-sections
 
-docs/book/fix_epub_layout.sh "$stable_epub" "$kindle_name"
+  pdfunite "$cover_pdf" "$body_pdf" "docs/book/dist/$stem.pdf"
+}
+
+build_troff_pdf() {
+  local stem="$1"
+  local kindle_name="$2"
+  local cover_md="$tmpdir/$stem-cover.md"
+  local cover_ms="$tmpdir/$stem-cover.ms"
+  local cover_pdf="$tmpdir/$stem-cover.pdf"
+  local body_ms="$tmpdir/$stem-body.ms"
+  local body_pdf="$tmpdir/$stem-body.pdf"
+
+  sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$cover_md"
+  extract_raw_block ms "$cover_md" "$cover_ms"
+  groff -Tpdf -ms "$cover_ms" > "$cover_pdf"
+
+  pandoc docs/book/omnighost.md \
+    -o "$body_ms" \
+    -t ms \
+    -s \
+    --toc \
+    --number-sections
+
+  groff -Tpdf -ms "$body_ms" > "$body_pdf"
+  pdfunite "$cover_pdf" "$body_pdf" "docs/book/dist/$stem.pdf"
+}
+
+build_epub() {
+  local stem="$1"
+  local kindle_name="$2"
+  local cover_md="$tmpdir/$stem-cover.md"
+  local stable_epub="docs/book/dist/$stem.epub"
+
+  sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$cover_md"
+  pandoc "$cover_md" docs/book/omnighost.md \
+    -o "$stable_epub" \
+    --toc \
+    --number-sections \
+    --metadata-file docs/book/metadata.yaml \
+    --metadata date="$pubdate" \
+    --css docs/book/epub.css \
+    --epub-title-page=false
+
+  docs/book/fix_epub_layout.sh "$stable_epub" "$kindle_name"
+}
 
 find docs/book/dist -maxdepth 1 \
-  \( -name "$title_stem (*).epub" -o -name "$title_stem (*).pdf" \) -delete
-ln -s "$(basename "$stable_epub")" "$versioned_epub"
-ln -s "$(basename "$stable_pdf")" "$versioned_pdf"
+  \( -name "$typst_stem (*).epub" -o -name "$typst_stem (*).pdf" \
+  -o -name "$troff_stem (*).epub" -o -name "$troff_stem (*).pdf" \) -delete
 
-docs/book/check_epub_metadata.sh "$stable_epub" "$kindle_name"
+build_typst_pdf "$typst_stem" "$kindle_name_typst"
+build_epub "$typst_stem" "$kindle_name_typst"
+build_troff_pdf "$troff_stem" "$kindle_name_troff"
+build_epub "$troff_stem" "$kindle_name_troff"
+
+ln -s "$(basename "docs/book/dist/$typst_stem.epub")" "docs/book/dist/$link_stem_typst.epub"
+ln -s "$(basename "docs/book/dist/$typst_stem.pdf")" "docs/book/dist/$link_stem_typst.pdf"
+ln -s "$(basename "docs/book/dist/$troff_stem.epub")" "docs/book/dist/$link_stem_troff.epub"
+ln -s "$(basename "docs/book/dist/$troff_stem.pdf")" "docs/book/dist/$link_stem_troff.pdf"
+
+docs/book/check_epub_metadata.sh "docs/book/dist/$typst_stem.epub" "$kindle_name_typst"
+docs/book/check_epub_metadata.sh "docs/book/dist/$troff_stem.epub" "$kindle_name_troff"
 
 if command -v ebook-convert >/dev/null 2>&1; then
-  ebook-convert "$stable_epub" "docs/book/dist/$title_stem.mobi"
+  ebook-convert "docs/book/dist/$typst_stem.epub" "docs/book/dist/$typst_stem.mobi"
+  ebook-convert "docs/book/dist/$troff_stem.epub" "docs/book/dist/$troff_stem.mobi"
 else
   echo "ebook-convert not found; skipped MOBI build" >&2
 fi
