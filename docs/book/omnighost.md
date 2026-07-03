@@ -249,10 +249,7 @@ The body of the note starts here.
 
 Each line is a **key** and a **value**. Obsidian shows these as a tidy **Properties panel** at the top of the note, with the right input for each type — a checkbox for yes/no, a date picker for dates, a list editor for lists.
 
-<figure>
-<img src="docs/book/media/file2.png" alt="A note’s Properties panel on a phone. The keys on the left (here prefixed ghost_) each have an editor on the right — text, checkboxes, and lists. Long key names are truncated; tap one to see it in full." />
-<figcaption aria-hidden="true">A note’s Properties panel on a phone. The keys on the left (here prefixed <code>ghost_</code>) each have an editor on the right — text, checkboxes, and lists. Long key names are truncated; tap one to see it in full.</figcaption>
-</figure>
+![A note’s Properties panel on a phone. The keys on the left (here prefixed `ghost_`) each have an editor on the right — text, checkboxes, and lists. Long key names are truncated; tap one to see it in full.](docs/book/media/file2.png)
 
 Why bother? Because properties make notes *queryable and automatable*. Plugins read them, dashboards filter on them, and — as you’ll see in the final chapter — a publishing plugin uses them to decide a post’s title, visibility, and schedule. For now, just know that the block at the top of a note is where the *structured* information lives, separate from the prose below it.
 
@@ -440,10 +437,7 @@ Because the choices are dropdowns, you can’t accidentally enter an invalid val
 
 Here’s the result on the open web — a note written on a phone, now a public post:
 
-<figure>
-<img src="docs/book/media/file6.png" alt="The same note published as a public post on a Ghost site, viewed in a mobile browser. The subscribe box at the bottom is Ghost’s standard newsletter call-to-action on public posts — not a paywall." />
-<figcaption aria-hidden="true">The same note published as a public post on a Ghost site, viewed in a mobile browser. The subscribe box at the bottom is Ghost’s standard newsletter call-to-action on public posts — not a paywall.</figcaption>
-</figure>
+![The same note published as a public post on a Ghost site, viewed in a mobile browser. The subscribe box at the bottom is Ghost’s standard newsletter call-to-action on public posts — not a paywall.](docs/book/media/file6.png)
 
 To **change** the post later, edit the note and **Save & sync** again. The plugin finds the existing post by its stored id and updates it — same URL, no duplicate. You can also run **Sync current note to ghost** from the command palette, or use the periodic folder sync if it is enabled for that blog.
 
@@ -494,10 +488,7 @@ Two extra settings control how cautious the workflow is:
 
 Ghost validates posts, and when a field is off it returns a precise message. Reading that message is the fastest way to fix it:
 
-<figure>
-<img src="docs/book/media/file7.png" alt="A Ghost validation error surfaced in Obsidian. The text names the exact problem — here, a slug longer than Ghost’s 191-character limit — which points straight at the fix." />
-<figcaption aria-hidden="true">A Ghost validation error surfaced in Obsidian. The text names the exact problem — here, a slug longer than Ghost’s 191-character limit — which points straight at the fix.</figcaption>
-</figure>
+![A Ghost validation error surfaced in Obsidian. The text names the exact problem — here, a slug longer than Ghost’s 191-character limit — which points straight at the fix.](docs/book/media/file7.png)
 
 A few common cases and what they mean:
 
