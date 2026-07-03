@@ -47,7 +47,6 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	private blogClients = new Map<string, GhostAPIClient>();
 	private syncDebounced?: (file: TFile) => void;
 	private statusBarItem: HTMLElement;
-	private periodicSyncInterval: number;
 	/** Per-blog periodic-sync timers, keyed by blog id. */
 	private blogSyncTimers = new Map<string, number>();
 	/** In-memory index of synced notes: file path → { blog id → ghost post id }. */
@@ -1161,10 +1160,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		if (hadOldMaps) toRemove.push(`${prefix}ids`, `${prefix}public_urls`);
 		if (hadLegacyClean) toRemove.push(`${prefix}id`, `${prefix}url`, `${prefix}public_url`);
 		if (Object.keys(updates).length > 0 || toRemove.length > 0) {
-			let content = await this.app.vault.read(file);
-			if (Object.keys(updates).length > 0) content = upsertFrontmatterKeys(content, updates);
-			if (toRemove.length > 0) content = removeFrontmatterKeys(content, toRemove);
-			await this.app.vault.modify(file, content);
+			await this.app.vault.process(file, (raw) => {
+				let content = raw;
+				if (Object.keys(updates).length > 0) content = upsertFrontmatterKeys(content, updates);
+				if (toRemove.length > 0) content = removeFrontmatterKeys(content, toRemove);
+				return content;
+			});
 		}
 		return ok;
 	}
@@ -1211,14 +1212,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			{ heading: 'Publish this note to…', confirmLabel: 'Set' },
 			async (chosen) => {
 				const prefix = this.settings.yamlPrefix;
-				const names = chosen.map(b => b.name);
-				const yaml = `[${names.map(n => `"${n}"`).join(', ')}]`;
-				let content = await this.app.vault.read(file);
-				content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
-				await this.app.vault.modify(file, content);
+				// Write stable domain keys, not display names (names break on rename).
+				const yaml = this.blogPropertyYaml(chosen);
+				await this.app.vault.process(file, (content) =>
+					upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml }));
 				this.settings.defaultBlogId = chosen[chosen.length - 1].id; // last = default
 				await this.saveSettings();
-				new Notice(`Note will publish to: ${names.join(', ')}`);
+				new Notice(`Note will publish to: ${chosen.map(b => b.name).join(', ')}`);
 			}
 		).open();
 	}
@@ -1315,12 +1315,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		let count = 0;
 		for (const file of files) {
 			try {
-				const content = await this.app.vault.read(file);
-				const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
-				if (changed) {
-					await this.app.vault.modify(file, migrated);
-					count++;
-				}
+				let didChange = false;
+				await this.app.vault.process(file, (content) => {
+					const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
+					didChange = changed;
+					return changed ? migrated : content;
+				});
+				if (didChange) count++;
 			} catch (e) {
 				console.error('[Ghost] Prefix migration failed for', file.path, e);
 			}
@@ -1375,7 +1376,6 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const info = { savedStatus: initialPublicUrl ? status : 'draft', publicUrl: initialPublicUrl, blogStatuses: this.buildBlogStatuses(file, fmObj) };
 		const availableBlogs = this.settings.blogs.map(b => ({ id: b.id, name: b.name }));
 		new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
-			let updated = await this.app.vault.read(file);
 			const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
 			const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
 			const escq = (s: string): string => s.replace(/\n/g, ' ').replace(/"/g, '\\"');
@@ -1394,10 +1394,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				.map(id => this.settings.blogs.find(b => b.id === id))
 				.filter((b): b is GhostBlog => !!b);
 			if (selectedBlogs.length > 0) {
-				ghostFields.blog = `[${selectedBlogs.map(b => `"${b.name}"`).join(', ')}]`;
+				// Write stable domain keys, not display names (names break on rename).
+				ghostFields.blog = this.blogPropertyYaml(selectedBlogs);
 			}
-			updated = upsertGhostMetadata(updated, ghostFields, prefix);
-			await this.app.vault.modify(file, updated);
+			await this.app.vault.process(file, (content) => upsertGhostMetadata(content, ghostFields, prefix));
 			if (selectedBlogs.length > 0) {
 				this.settings.defaultBlogId = selectedBlogs[selectedBlogs.length - 1].id; // last = default
 				await this.saveSettings();
@@ -1493,20 +1493,18 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					ghostFields.blog = this.blogPropertyYaml([blog]);
 				}
 
-				let content = await this.app.vault.read(file);
-				content = upsertGhostMetadata(content, ghostFields, prefix);
 				const bodyMarkdown = htmlToMarkdown(post.html ?? '');
-				const parsed = splitFrontmatter(content);
 				const title = post.title || 'Untitled Post';
-				content = parsed
-					? joinFrontmatter(parsed.raw, `\n# ${title}\n\n${bodyMarkdown}`)
-					: `# ${title}\n\n${bodyMarkdown}`;
-				await this.app.vault.modify(file, content);
+				await this.app.vault.process(file, (raw) => {
+					const content = upsertGhostMetadata(raw, ghostFields, prefix);
+					const parsed = splitFrontmatter(content);
+					return parsed
+						? joinFrontmatter(parsed.raw, `\n# ${title}\n\n${bodyMarkdown}`)
+						: `# ${title}\n\n${bodyMarkdown}`;
+				});
 				await this.ensureInFolder(file, targetFolder);
 				new Notice(`Linked and updated note from Ghost: "${title}"${blog ? ` (${blog.name})` : ''}`);
 			} else {
-				let content = await this.app.vault.read(file);
-				content = addGhostPropertiesToContent(content, this.settings);
 				const upserts: Record<string, string> = { [`${prefix}slug`]: post.slug };
 				if (blog) {
 					const keys = this.blogKeys(blog);
@@ -1514,8 +1512,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					upserts[keys.url] = ghostUrl;
 					upserts[`${prefix}blog`] = this.blogPropertyYaml([blog]);
 				}
-				content = upsertFrontmatterKeys(content, upserts);
-				await this.app.vault.modify(file, content);
+				await this.app.vault.process(file, (raw) =>
+					upsertFrontmatterKeys(addGhostPropertiesToContent(raw, this.settings), upserts));
 				const movedFile = await this.ensureInFolder(file, targetFolder);
 				await this.syncFileRouted(movedFile ?? file);
 				new Notice(`Linked and synced note to Ghost: "${file.basename}"${blog ? ` (${blog.name})` : ''}`);
@@ -1524,14 +1522,6 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			console.error('[Ghost Link] Error linking note:', error);
 			new Notice(`Failed to link note: ${(error as Error).message}`);
 		}
-	}
-
-	/**
-	 * Ensure a file is inside the configured sync folder.
-	 * Moves it there if it isn't. Returns the (possibly moved) TFile.
-	 */
-	private async ensureInSyncFolder(file: TFile): Promise<TFile | null> {
-		return this.ensureInFolder(file, this.settings.syncFolder);
 	}
 
 	/** Move a file into `folderPath` if it isn't already there. Returns the moved TFile, or null if unchanged. */
@@ -1569,9 +1559,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		);
 
 		if (!hasGhostProps) {
-			const content = await this.app.vault.read(file);
-			const newContent = addGhostPropertiesToContent(content, this.settings);
-			await this.app.vault.modify(file, newContent);
+			await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
 			new Notice('Ghost properties added. Syncing…');
 			// Wait for metadata cache to update before proceeding
 			await new Promise(resolve => activeWindow.setTimeout(resolve, 300));
@@ -1621,20 +1609,17 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		try {
-			// Read current content
-			const content = await this.app.vault.read(file);
-
 			// Add Ghost properties (will add only missing ones)
-			const newContent = addGhostPropertiesToContent(content, this.settings);
-
-			// Check if anything was added
-			if (newContent === content) {
+			let added = false;
+			await this.app.vault.process(file, (content) => {
+				const newContent = addGhostPropertiesToContent(content, this.settings);
+				added = newContent !== content;
+				return newContent;
+			});
+			if (!added) {
 				new Notice('This note already has all ghost properties');
 				return;
 			}
-
-			// Write back to file
-			await this.app.vault.modify(file, newContent);
 
 			new Notice('Ghost properties added! This note will now sync with ghost.');
 
@@ -1698,16 +1683,14 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const newDateLabel = base.toLocaleString();
 
 		// Read current frontmatter to check for existing date
-		const content = await this.app.vault.read(file);
 		const cache = this.app.metadataCache.getFileCache(file);
 		const existingDate = cache?.frontmatter?.[`${this.settings.yamlPrefix}published_at`] as string | undefined;
 
 		const applyDate = async (): Promise<void> => {
-			const updated = upsertFrontmatterKeys(content, {
+			await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, {
 				[`${this.settings.yamlPrefix}published_at`]: newIso,
 				[`${this.settings.yamlPrefix}published`]: 'true',
-			});
-			await this.app.vault.modify(file, updated);
+			}));
 			new Notice(`Scheduled for ${newDateLabel}`);
 		};
 
@@ -1769,14 +1752,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		if (moved instanceof TFile) {
 			try {
 				const prefix = this.settings.yamlPrefix;
-				const content = await this.app.vault.read(moved);
-				const updated = upsertFrontmatterKeys(content, {
+				await this.app.vault.process(moved, (content) => upsertFrontmatterKeys(content, {
 					[`${prefix}archived`]: 'true',
 					[`${prefix}archived_at`]: `"${new Date().toISOString()}"`,
 					[`${prefix}archived_from`]: `"${originalPath}"`,
 					[`${prefix}no_sync`]: 'true',
-				});
-				if (updated !== content) await this.app.vault.modify(moved, updated);
+				}));
 			} catch (e) {
 				console.error('[Ghost] archive metadata stamp failed:', e);
 			}
@@ -1975,9 +1956,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	async deleteOrphanPost(file: TFile, blog: GhostBlog, ghostId: string): Promise<void> {
 		await this.deleteOneRemote(blog.id, ghostId);
 		const { keys } = this.storedKeysForBlog(file, blog);
-		let content = await this.app.vault.read(file);
-		content = removeFrontmatterKeys(content, keys);
-		await this.app.vault.modify(file, content);
+		await this.app.vault.process(file, (content) => removeFrontmatterKeys(content, keys));
 		new Notice(`Deleted orphaned post on ${blog.name}`);
 	}
 
@@ -1995,9 +1974,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		if (blogs.length === 0) return;
 		const prefix = this.settings.yamlPrefix;
 		const yaml = this.blogPropertyYaml(blogs);
-		let content = await this.app.vault.read(file);
-		content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
-		await this.app.vault.modify(file, content);
+		await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml }));
 	}
 
 	// ─── Domain-key normalization + rename migration ─────────────────────────
@@ -2048,10 +2025,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					}
 				}
 				if (Object.keys(updates).length === 0 && removals.length === 0) continue;
-				let content = before;
-				if (Object.keys(updates).length) content = upsertFrontmatterKeys(content, updates);
-				if (removals.length) content = removeFrontmatterKeys(content, removals);
-				if (content !== before) { await this.app.vault.modify(file, content); changed++; }
+				let didChange = false;
+				await this.app.vault.process(file, (raw) => {
+					let content = raw;
+					if (Object.keys(updates).length) content = upsertFrontmatterKeys(content, updates);
+					if (removals.length) content = removeFrontmatterKeys(content, removals);
+					didChange = content !== raw;
+					return content;
+				});
+				if (didChange) changed++;
 			} catch (e) {
 				console.error('[Ghost] normalize failed for', file.path, e);
 			}
@@ -2102,10 +2084,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					}
 				}
 				if (Object.keys(updates).length === 0 && removals.length === 0) continue;
-				let content = before;
-				if (Object.keys(updates).length) content = upsertFrontmatterKeys(content, updates);
-				if (removals.length) content = removeFrontmatterKeys(content, removals);
-				if (content !== before) { await this.app.vault.modify(file, content); changed++; }
+				let didChange = false;
+				await this.app.vault.process(file, (raw) => {
+					let content = raw;
+					if (Object.keys(updates).length) content = upsertFrontmatterKeys(content, updates);
+					if (removals.length) content = removeFrontmatterKeys(content, removals);
+					didChange = content !== raw;
+					return content;
+				});
+				if (didChange) changed++;
 			} catch (e) {
 				console.error('[Ghost] rename migration failed for', file.path, e);
 			}

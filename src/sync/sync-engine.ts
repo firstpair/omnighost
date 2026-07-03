@@ -111,19 +111,17 @@ export class SyncEngine {
 			ghostFields[`public_url_${blogSuffix}`] = post.url;
 		}
 
-		let content = await this.app.vault.read(file);
-		content = upsertGhostMetadata(content, ghostFields, prefix);
-
 		// Replace the body with the Ghost post content (HTML → Markdown).
 		// Note: Ghost stores Lexical; this conversion is a close approximation.
 		const title = post.title || 'Untitled Post';
 		const bodyMarkdown = htmlToMarkdown(post.html ?? '');
-		const parsed = splitFrontmatter(content);
-		content = parsed
-			? joinFrontmatter(parsed.raw, `\n# ${title}\n\n${bodyMarkdown}`)
-			: `# ${title}\n\n${bodyMarkdown}`;
-
-		await this.app.vault.modify(file, content);
+		await this.app.vault.process(file, (raw) => {
+			const content = upsertGhostMetadata(raw, ghostFields, prefix);
+			const parsed = splitFrontmatter(content);
+			return parsed
+				? joinFrontmatter(parsed.raw, `\n# ${title}\n\n${bodyMarkdown}`)
+				: `# ${title}\n\n${bodyMarkdown}`;
+		});
 		if (this.settings.showSyncNotifications) {
 			new Notice(`Seeded from Ghost: "${title}"`);
 		}
@@ -371,12 +369,16 @@ export class SyncEngine {
 				if (this.writeBack && ownsClean && (needsId || needsUrl || needsPublic)) {
 					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
-					let updatedContent = content;
-					if (needsId) {
-						updatedContent = updateFrontmatterWithGhostId(updatedContent, ghostPost.id, ghostPost.slug, this.settings.yamlPrefix);
-					}
-					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-					await this.app.vault.modify(file, updatedContent);
+					const syncedPost = ghostPost;
+					// vault.process: the network round-trip above can race a user edit,
+					// so apply the frontmatter write-back to the file's CURRENT content.
+					await this.app.vault.process(file, (raw) => {
+						let updatedContent = raw;
+						if (needsId) {
+							updatedContent = updateFrontmatterWithGhostId(updatedContent, syncedPost.id, syncedPost.slug, this.settings.yamlPrefix);
+						}
+						return updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+					});
 					console.debug('[Ghost Sync] Frontmatter updated with Ghost id/url/public_url');
 				}
 			} else {
@@ -398,14 +400,17 @@ export class SyncEngine {
 					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
 					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
 					const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
-					let updatedContent = updateFrontmatterWithGhostId(
-						content,
-						capturedGhostPost.id,
-						capturedGhostPost.slug,
-						this.settings.yamlPrefix
-					);
-					updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-					await this.app.vault.modify(file, updatedContent);
+					// vault.process: the create round-trip above can race a user edit,
+					// so apply the frontmatter write-back to the file's CURRENT content.
+					await this.app.vault.process(file, (raw) => {
+						const updatedContent = updateFrontmatterWithGhostId(
+							raw,
+							capturedGhostPost.id,
+							capturedGhostPost.slug,
+							this.settings.yamlPrefix
+						);
+						return updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+					});
 					console.debug('[Ghost Sync] Frontmatter updated with Ghost ID, editor URL, public URL');
 				}
 			}
@@ -472,22 +477,6 @@ export class SyncEngine {
 		}
 
 		return results;
-	}
-
-	/**
-	 * Delete the Ghost post associated with a deleted Obsidian note.
-	 * Only acts if the file has a ghost_id in its frontmatter.
-	 */
-	async deletePostForFile(file: TFile): Promise<void> {
-		const cache = this.app.metadataCache.getFileCache(file);
-		const frontmatter = cache?.frontmatter;
-		if (!frontmatter) return;
-
-		const postId = frontmatter[`${this.settings.yamlPrefix}id`] as string | undefined;
-		if (!postId) return;
-
-		await this.ghostClient.deletePost(postId);
-		new Notice(`Post deletado no Ghost: "${file.basename}"`);
 	}
 
 	/**

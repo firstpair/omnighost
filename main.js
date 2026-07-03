@@ -1282,18 +1282,18 @@ var SyncEngine = class {
     if (isPublic && post.url) {
       ghostFields[`public_url_${blogSuffix}`] = post.url;
     }
-    let content = await this.app.vault.read(file);
-    content = upsertGhostMetadata(content, ghostFields, prefix);
     const title = post.title || "Untitled Post";
     const bodyMarkdown = htmlToMarkdown((_f = post.html) != null ? _f : "");
-    const parsed = splitFrontmatter(content);
-    content = parsed ? joinFrontmatter(parsed.raw, `
+    await this.app.vault.process(file, (raw) => {
+      const content = upsertGhostMetadata(raw, ghostFields, prefix);
+      const parsed = splitFrontmatter(content);
+      return parsed ? joinFrontmatter(parsed.raw, `
 # ${title}
 
 ${bodyMarkdown}`) : `# ${title}
 
 ${bodyMarkdown}`;
-    await this.app.vault.modify(file, content);
+    });
     if (this.settings.showSyncNotifications) {
       new import_obsidian3.Notice(`Seeded from Ghost: "${title}"`);
     }
@@ -1448,12 +1448,14 @@ ${bodyMarkdown}`;
         if (this.writeBack && ownsClean && (needsId || needsUrl || needsPublic)) {
           const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
           const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
-          let updatedContent = content;
-          if (needsId) {
-            updatedContent = updateFrontmatterWithGhostId(updatedContent, ghostPost.id, ghostPost.slug, this.settings.yamlPrefix);
-          }
-          updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-          await this.app.vault.modify(file, updatedContent);
+          const syncedPost = ghostPost;
+          await this.app.vault.process(file, (raw) => {
+            let updatedContent = raw;
+            if (needsId) {
+              updatedContent = updateFrontmatterWithGhostId(updatedContent, syncedPost.id, syncedPost.slug, this.settings.yamlPrefix);
+            }
+            return updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+          });
           console.debug("[Ghost Sync] Frontmatter updated with Ghost id/url/public_url");
         }
       } else {
@@ -1469,14 +1471,15 @@ ${bodyMarkdown}`;
           const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
           const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
           const publicUrl = status === "published" || status === "scheduled" ? capturedGhostPost.url || void 0 : void 0;
-          let updatedContent = updateFrontmatterWithGhostId(
-            content,
-            capturedGhostPost.id,
-            capturedGhostPost.slug,
-            this.settings.yamlPrefix
-          );
-          updatedContent = updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
-          await this.app.vault.modify(file, updatedContent);
+          await this.app.vault.process(file, (raw) => {
+            const updatedContent = updateFrontmatterWithGhostId(
+              raw,
+              capturedGhostPost.id,
+              capturedGhostPost.slug,
+              this.settings.yamlPrefix
+            );
+            return updateFrontmatterWithGhostUrl(updatedContent, ghostEditorUrl, this.settings.yamlPrefix, publicUrl);
+          });
           console.debug("[Ghost Sync] Frontmatter updated with Ghost ID, editor URL, public URL");
         }
       }
@@ -1527,21 +1530,6 @@ ${bodyMarkdown}`;
       new import_obsidian3.Notice(`Sync failed: ${error.message}`);
     }
     return results;
-  }
-  /**
-   * Delete the Ghost post associated with a deleted Obsidian note.
-   * Only acts if the file has a ghost_id in its frontmatter.
-   */
-  async deletePostForFile(file) {
-    const cache = this.app.metadataCache.getFileCache(file);
-    const frontmatter = cache == null ? void 0 : cache.frontmatter;
-    if (!frontmatter)
-      return;
-    const postId = frontmatter[`${this.settings.yamlPrefix}id`];
-    if (!postId)
-      return;
-    await this.ghostClient.deletePost(postId);
-    new import_obsidian3.Notice(`Post deletado no Ghost: "${file.basename}"`);
   }
   /**
    * Check if file should be synced
@@ -3503,12 +3491,14 @@ ${bodyMarkdown}`;
     if (hadLegacyClean)
       toRemove.push(`${prefix}id`, `${prefix}url`, `${prefix}public_url`);
     if (Object.keys(updates).length > 0 || toRemove.length > 0) {
-      let content = await this.app.vault.read(file);
-      if (Object.keys(updates).length > 0)
-        content = upsertFrontmatterKeys(content, updates);
-      if (toRemove.length > 0)
-        content = removeFrontmatterKeys(content, toRemove);
-      await this.app.vault.modify(file, content);
+      await this.app.vault.process(file, (raw) => {
+        let content = raw;
+        if (Object.keys(updates).length > 0)
+          content = upsertFrontmatterKeys(content, updates);
+        if (toRemove.length > 0)
+          content = removeFrontmatterKeys(content, toRemove);
+        return content;
+      });
     }
     return ok;
   }
@@ -3556,14 +3546,11 @@ ${bodyMarkdown}`;
       { heading: "Publish this note to\u2026", confirmLabel: "Set" },
       async (chosen) => {
         const prefix = this.settings.yamlPrefix;
-        const names = chosen.map((b) => b.name);
-        const yaml = `[${names.map((n) => `"${n}"`).join(", ")}]`;
-        let content = await this.app.vault.read(file);
-        content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
-        await this.app.vault.modify(file, content);
+        const yaml = this.blogPropertyYaml(chosen);
+        await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml }));
         this.settings.defaultBlogId = chosen[chosen.length - 1].id;
         await this.saveSettings();
-        new import_obsidian10.Notice(`Note will publish to: ${names.join(", ")}`);
+        new import_obsidian10.Notice(`Note will publish to: ${chosen.map((b) => b.name).join(", ")}`);
       }
     ).open();
   }
@@ -3666,12 +3653,14 @@ ${body}`;
     let count = 0;
     for (const file of files) {
       try {
-        const content = await this.app.vault.read(file);
-        const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
-        if (changed) {
-          await this.app.vault.modify(file, migrated);
+        let didChange = false;
+        await this.app.vault.process(file, (content) => {
+          const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
+          didChange = changed;
+          return changed ? migrated : content;
+        });
+        if (didChange)
           count++;
-        }
       } catch (e) {
         console.error("[Ghost] Prefix migration failed for", file.path, e);
       }
@@ -3718,7 +3707,6 @@ ${body}`;
     const availableBlogs = this.settings.blogs.map((b) => ({ id: b.id, name: b.name }));
     new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
       var _a2, _b2, _c2;
-      let updated = await this.app.vault.read(file);
       const tags = form.tags.split(",").map((t) => t.trim()).filter(Boolean);
       const tagsYaml = tags.length > 0 ? `[${tags.map((t) => `"${t}"`).join(", ")}]` : "[]";
       const escq = (s) => s.replace(/\n/g, " ").replace(/"/g, '\\"');
@@ -3735,10 +3723,9 @@ ${body}`;
       };
       const selectedBlogs = form.blogIds.map((id) => this.settings.blogs.find((b) => b.id === id)).filter((b) => !!b);
       if (selectedBlogs.length > 0) {
-        ghostFields.blog = `[${selectedBlogs.map((b) => `"${b.name}"`).join(", ")}]`;
+        ghostFields.blog = this.blogPropertyYaml(selectedBlogs);
       }
-      updated = upsertGhostMetadata(updated, ghostFields, prefix);
-      await this.app.vault.modify(file, updated);
+      await this.app.vault.process(file, (content2) => upsertGhostMetadata(content2, ghostFields, prefix));
       if (selectedBlogs.length > 0) {
         this.settings.defaultBlogId = selectedBlogs[selectedBlogs.length - 1].id;
         await this.saveSettings();
@@ -3821,23 +3808,21 @@ ${body}`;
             ghostFields[`public_url_${s}`] = post.url;
           ghostFields.blog = this.blogPropertyYaml([blog]);
         }
-        let content = await this.app.vault.read(file);
-        content = upsertGhostMetadata(content, ghostFields, prefix);
         const bodyMarkdown = htmlToMarkdown((_f = post.html) != null ? _f : "");
-        const parsed = splitFrontmatter(content);
         const title = post.title || "Untitled Post";
-        content = parsed ? joinFrontmatter(parsed.raw, `
+        await this.app.vault.process(file, (raw) => {
+          const content = upsertGhostMetadata(raw, ghostFields, prefix);
+          const parsed = splitFrontmatter(content);
+          return parsed ? joinFrontmatter(parsed.raw, `
 # ${title}
 
 ${bodyMarkdown}`) : `# ${title}
 
 ${bodyMarkdown}`;
-        await this.app.vault.modify(file, content);
+        });
         await this.ensureInFolder(file, targetFolder);
         new import_obsidian10.Notice(`Linked and updated note from Ghost: "${title}"${blog ? ` (${blog.name})` : ""}`);
       } else {
-        let content = await this.app.vault.read(file);
-        content = addGhostPropertiesToContent(content, this.settings);
         const upserts = { [`${prefix}slug`]: post.slug };
         if (blog) {
           const keys = this.blogKeys(blog);
@@ -3845,8 +3830,7 @@ ${bodyMarkdown}`;
           upserts[keys.url] = ghostUrl;
           upserts[`${prefix}blog`] = this.blogPropertyYaml([blog]);
         }
-        content = upsertFrontmatterKeys(content, upserts);
-        await this.app.vault.modify(file, content);
+        await this.app.vault.process(file, (raw) => upsertFrontmatterKeys(addGhostPropertiesToContent(raw, this.settings), upserts));
         const movedFile = await this.ensureInFolder(file, targetFolder);
         await this.syncFileRouted(movedFile != null ? movedFile : file);
         new import_obsidian10.Notice(`Linked and synced note to Ghost: "${file.basename}"${blog ? ` (${blog.name})` : ""}`);
@@ -3855,13 +3839,6 @@ ${bodyMarkdown}`;
       console.error("[Ghost Link] Error linking note:", error);
       new import_obsidian10.Notice(`Failed to link note: ${error.message}`);
     }
-  }
-  /**
-   * Ensure a file is inside the configured sync folder.
-   * Moves it there if it isn't. Returns the (possibly moved) TFile.
-   */
-  async ensureInSyncFolder(file) {
-    return this.ensureInFolder(file, this.settings.syncFolder);
   }
   /** Move a file into `folderPath` if it isn't already there. Returns the moved TFile, or null if unchanged. */
   async ensureInFolder(file, folderPath) {
@@ -3894,9 +3871,7 @@ ${bodyMarkdown}`;
       (key) => key.startsWith(this.settings.yamlPrefix)
     );
     if (!hasGhostProps) {
-      const content = await this.app.vault.read(file);
-      const newContent = addGhostPropertiesToContent(content, this.settings);
-      await this.app.vault.modify(file, newContent);
+      await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
       new import_obsidian10.Notice("Ghost properties added. Syncing\u2026");
       await new Promise((resolve) => activeWindow.setTimeout(resolve, 300));
       cache = this.app.metadataCache.getFileCache(file);
@@ -3936,13 +3911,16 @@ ${bodyMarkdown}`;
       return;
     }
     try {
-      const content = await this.app.vault.read(file);
-      const newContent = addGhostPropertiesToContent(content, this.settings);
-      if (newContent === content) {
+      let added = false;
+      await this.app.vault.process(file, (content) => {
+        const newContent = addGhostPropertiesToContent(content, this.settings);
+        added = newContent !== content;
+        return newContent;
+      });
+      if (!added) {
         new import_obsidian10.Notice("This note already has all ghost properties");
         return;
       }
-      await this.app.vault.modify(file, newContent);
       new import_obsidian10.Notice("Ghost properties added! This note will now sync with ghost.");
       const syncFolderPath = (0, import_obsidian10.normalizePath)(this.settings.syncFolder);
       const currentFolder = ((_a = file.parent) == null ? void 0 : _a.path) || "";
@@ -3989,15 +3967,13 @@ ${bodyMarkdown}`;
     base.setUTCHours(hh, mm, 0, 0);
     const newIso = base.toISOString();
     const newDateLabel = base.toLocaleString();
-    const content = await this.app.vault.read(file);
     const cache = this.app.metadataCache.getFileCache(file);
     const existingDate = (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a[`${this.settings.yamlPrefix}published_at`];
     const applyDate = async () => {
-      const updated = upsertFrontmatterKeys(content, {
+      await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, {
         [`${this.settings.yamlPrefix}published_at`]: newIso,
         [`${this.settings.yamlPrefix}published`]: "true"
-      });
-      await this.app.vault.modify(file, updated);
+      }));
       new import_obsidian10.Notice(`Scheduled for ${newDateLabel}`);
     };
     if (existingDate) {
@@ -4058,15 +4034,12 @@ ${bodyMarkdown}`;
     if (moved instanceof import_obsidian10.TFile) {
       try {
         const prefix = this.settings.yamlPrefix;
-        const content = await this.app.vault.read(moved);
-        const updated = upsertFrontmatterKeys(content, {
+        await this.app.vault.process(moved, (content) => upsertFrontmatterKeys(content, {
           [`${prefix}archived`]: "true",
           [`${prefix}archived_at`]: `"${(/* @__PURE__ */ new Date()).toISOString()}"`,
           [`${prefix}archived_from`]: `"${originalPath}"`,
           [`${prefix}no_sync`]: "true"
-        });
-        if (updated !== content)
-          await this.app.vault.modify(moved, updated);
+        }));
       } catch (e) {
         console.error("[Ghost] archive metadata stamp failed:", e);
       }
@@ -4288,9 +4261,7 @@ ${bodyMarkdown}`;
   async deleteOrphanPost(file, blog, ghostId) {
     await this.deleteOneRemote(blog.id, ghostId);
     const { keys } = this.storedKeysForBlog(file, blog);
-    let content = await this.app.vault.read(file);
-    content = removeFrontmatterKeys(content, keys);
-    await this.app.vault.modify(file, content);
+    await this.app.vault.process(file, (content) => removeFrontmatterKeys(content, keys));
     new import_obsidian10.Notice(`Deleted orphaned post on ${blog.name}`);
   }
   /** Re-add an orphaned blog to g_blog and sync it now, so the note publishes to both. */
@@ -4307,9 +4278,7 @@ ${bodyMarkdown}`;
       return;
     const prefix = this.settings.yamlPrefix;
     const yaml = this.blogPropertyYaml(blogs);
-    let content = await this.app.vault.read(file);
-    content = upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml });
-    await this.app.vault.modify(file, content);
+    await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml }));
   }
   // ─── Domain-key normalization + rename migration ─────────────────────────
   /** One-shot upgrade of existing notes to domain-keyed blog references. Idempotent. */
@@ -4374,15 +4343,18 @@ ${bodyMarkdown}`;
         }
         if (Object.keys(updates).length === 0 && removals.length === 0)
           continue;
-        let content = before;
-        if (Object.keys(updates).length)
-          content = upsertFrontmatterKeys(content, updates);
-        if (removals.length)
-          content = removeFrontmatterKeys(content, removals);
-        if (content !== before) {
-          await this.app.vault.modify(file, content);
+        let didChange = false;
+        await this.app.vault.process(file, (raw2) => {
+          let content = raw2;
+          if (Object.keys(updates).length)
+            content = upsertFrontmatterKeys(content, updates);
+          if (removals.length)
+            content = removeFrontmatterKeys(content, removals);
+          didChange = content !== raw2;
+          return content;
+        });
+        if (didChange)
           changed++;
-        }
       } catch (e) {
         console.error("[Ghost] normalize failed for", file.path, e);
       }
@@ -4447,15 +4419,18 @@ ${bodyMarkdown}`;
         }
         if (Object.keys(updates).length === 0 && removals.length === 0)
           continue;
-        let content = before;
-        if (Object.keys(updates).length)
-          content = upsertFrontmatterKeys(content, updates);
-        if (removals.length)
-          content = removeFrontmatterKeys(content, removals);
-        if (content !== before) {
-          await this.app.vault.modify(file, content);
+        let didChange = false;
+        await this.app.vault.process(file, (raw2) => {
+          let content = raw2;
+          if (Object.keys(updates).length)
+            content = upsertFrontmatterKeys(content, updates);
+          if (removals.length)
+            content = removeFrontmatterKeys(content, removals);
+          didChange = content !== raw2;
+          return content;
+        });
+        if (didChange)
           changed++;
-        }
       } catch (e) {
         console.error("[Ghost] rename migration failed for", file.path, e);
       }
