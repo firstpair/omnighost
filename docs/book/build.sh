@@ -74,6 +74,28 @@ extract_raw_block() {
   ' "$source" > "$output"
 }
 
+# Re-embed any unembedded fonts (groff -P-e silently fails when its devpdf
+# "download" map is stale, e.g. after a ghostscript upgrade). Ghostscript
+# substitutes metrically-compatible URW fonts for the base 14 and embeds
+# them; without embedding, readers substitute fonts with different metrics
+# and word spacing renders wrong (gaps too wide or missing).
+embed_pdf_fonts() {
+  local pdf="$1"
+  if command -v gs >/dev/null 2>&1; then
+    local tmp="$tmpdir/$(basename "$pdf" .pdf)-embedded.pdf"
+    if gs -q -dBATCH -dNOPAUSE -sDEVICE=pdfwrite \
+        -dEmbedAllFonts=true -dSubsetFonts=true \
+        -o "$tmp" -c '<</NeverEmbed []>> setdistillerparams' -f "$pdf"; then
+      mv "$tmp" "$pdf"
+    fi
+  fi
+  if command -v pdffonts >/dev/null 2>&1; then
+    if ! pdffonts "$pdf" | awk 'NR>2 && $(NF-4)=="no" { bad=1 } END { exit bad }'; then
+      echo "WARNING: $pdf has unembedded fonts — word spacing will render wrong in most readers" >&2
+    fi
+  fi
+}
+
 build_typst_pdf() {
   local stem="$1"
   local kindle_name="$2"
@@ -106,7 +128,10 @@ build_troff_pdf() {
 
   sed "s/{{KINDLE_NAME}}/$kindle_name/g" docs/book/cover.md > "$cover_md"
   extract_raw_block ms "$cover_md" "$cover_ms"
-  groff -Tpdf -ms "$cover_ms" > "$cover_pdf"
+  # -t: tbl preprocessor (pandoc emits .TS/.TE tables); -P-e: embed fonts in
+  # the PDF — without embedding, readers substitute fonts with different
+  # metrics and word spacing breaks (gaps too wide or missing).
+  groff -Tpdf -P-e -t -ms "$cover_ms" > "$cover_pdf"
 
   pandoc docs/book/omnighost.md \
     -o "$body_ms" \
@@ -115,8 +140,9 @@ build_troff_pdf() {
     --toc \
     --number-sections
 
-  groff -Tpdf -ms "$body_ms" > "$body_pdf"
+  groff -Tpdf -P-e -t -ms "$body_ms" > "$body_pdf"
   pdfunite "$cover_pdf" "$body_pdf" "docs/book/dist/$stem.pdf"
+  embed_pdf_fonts "docs/book/dist/$stem.pdf"
 }
 
 build_epub() {
