@@ -8,6 +8,7 @@ export interface GhostBlog {
 	url: string;
 	apiKeySecretName: string; // name of the secret in Obsidian's keychain
 	folder: string;           // vault folder for this blog's posts
+	folderAuto?: boolean;     // folder is derived from the URL: "<root>/<domain>"
 	syncEnabled?: boolean;    // per-blog periodic sync toggle
 	syncIntervalMinutes?: number; // optional per-blog sync cadence override
 	aliases?: string[];       // previous names/tokens accepted by g_blog matching

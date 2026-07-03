@@ -3106,6 +3106,16 @@ ${bodyMarkdown}`;
       return "";
     }
   }
+  /** Root folder all blog folders nest under (the legacy sync folder, default "Ghost Posts"). */
+  ghostPostsRoot() {
+    return (0, import_obsidian10.normalizePath)((this.settings.syncFolder || "Ghost Posts").trim() || "Ghost Posts");
+  }
+  /** Derived folder for a blog: "<root>/<domain>", or the root itself if the URL has no host. */
+  defaultFolderFor(blog) {
+    const host = this.hostOf(blog.url);
+    const root = this.ghostPostsRoot();
+    return host ? (0, import_obsidian10.normalizePath)(`${root}/${host}`) : root;
+  }
   /** Frontmatter-key-safe suffix for a blog name (e.g. "Chief Scientist" → "chief_scientist"). */
   blogKeySuffix(name) {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "blog";
@@ -3193,10 +3203,19 @@ ${bodyMarkdown}`;
   /** Migrate the legacy single-blog config into blogs[] on first run. */
   async migrateBlogs() {
     if (this.settings.blogs && this.settings.blogs.length > 0) {
+      let changed = false;
+      for (const b of this.settings.blogs) {
+        if (b.folderAuto === void 0) {
+          b.folderAuto = false;
+          changed = true;
+        }
+      }
       if (!this.settings.defaultBlogId || !this.settings.blogs.some((b) => b.id === this.settings.defaultBlogId)) {
         this.settings.defaultBlogId = this.settings.blogs[0].id;
-        await this.saveSettings();
+        changed = true;
       }
+      if (changed)
+        await this.saveSettings();
       return;
     }
     const blog = {
@@ -3204,7 +3223,8 @@ ${bodyMarkdown}`;
       name: this.deriveBlogName(this.settings.ghostUrl) || "My blog",
       url: this.settings.ghostUrl,
       apiKeySecretName: this.settings.ghostApiKeySecretName,
-      folder: this.settings.syncFolder
+      folder: this.settings.syncFolder,
+      folderAuto: false
     };
     this.settings.blogs = [blog];
     this.settings.defaultBlogId = blog.id;
@@ -3250,28 +3270,131 @@ ${bodyMarkdown}`;
     var _a, _b;
     return (_b = (_a = this.settings.blogs.find((b) => b.id === this.settings.defaultBlogId)) != null ? _a : this.settings.blogs[0]) != null ? _b : null;
   }
-  /** Resolve which blog(s) a note targets, from its g_blog property; else the default. */
-  resolveBlogsForFile(file) {
+  /** Blogs explicitly named by a note's g_blog property (empty if none match). */
+  explicitBlogsForFile(file) {
     var _a;
     const prefix = this.settings.yamlPrefix;
     const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
     const raw = fm ? fm[`${prefix}blog`] : void 0;
     const tokens = Array.isArray(raw) ? raw.map((v) => String(v).trim()).filter(Boolean) : typeof raw === "string" && raw.trim() ? [raw.trim()] : [];
-    if (tokens.length > 0) {
-      const seen = /* @__PURE__ */ new Set();
-      const found = [];
-      for (const t of tokens) {
-        const b = this.settings.blogs.find((bl) => this.blogMatchesToken(bl, t));
-        if (b && !seen.has(b.id)) {
-          seen.add(b.id);
-          found.push(b);
-        }
+    const seen = /* @__PURE__ */ new Set();
+    const found = [];
+    for (const t of tokens) {
+      const b = this.settings.blogs.find((bl) => this.blogMatchesToken(bl, t));
+      if (b && !seen.has(b.id)) {
+        seen.add(b.id);
+        found.push(b);
       }
-      if (found.length > 0)
-        return found;
     }
+    return found;
+  }
+  /** The blog whose folder contains this path (longest folder wins), if any. */
+  blogForPath(path) {
+    let best = null;
+    let bestLen = -1;
+    for (const b of this.settings.blogs) {
+      const f = (0, import_obsidian10.normalizePath)(b.folder);
+      if (f && (path === f || path.startsWith(f + "/")) && f.length > bestLen) {
+        best = b;
+        bestLen = f.length;
+      }
+    }
+    return best;
+  }
+  /** Resolve which blog(s) a note targets: its g_blog property, else the blog whose
+   *  folder contains it (a note dropped in "Ghost Posts/chief.sc/" publishes there),
+   *  else the default blog. */
+  resolveBlogsForFile(file) {
+    const explicit = this.explicitBlogsForFile(file);
+    if (explicit.length > 0)
+      return explicit;
+    const inferred = this.blogForPath(file.path);
+    if (inferred)
+      return [inferred];
     const def = this.defaultBlog();
     return def ? [def] : [];
+  }
+  /** The single blog a note is filed under when organizing folders: its first
+   *  explicit g_blog target, else the first blog it has a stored post id for,
+   *  else the default blog. (Deliberately ignores path inference — the point
+   *  is to decide where the file should move to.) */
+  organizeOwnerFor(file) {
+    var _a;
+    const explicit = this.explicitBlogsForFile(file);
+    if (explicit.length > 0)
+      return explicit[0];
+    const fm = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+    if (fm) {
+      const withId = this.settings.blogs.find((b) => this.readBlogId(fm, b));
+      if (withId)
+        return withId;
+    }
+    return this.defaultBlog();
+  }
+  /** Move every blog's notes under "<root>/<domain>" and re-point the blog folders.
+   *  Notes are moved with fileManager.renameFile so vault links stay intact. */
+  async organizeBlogFolders() {
+    var _a, _b;
+    let moved = 0;
+    let skipped = 0;
+    const plans = [];
+    for (const blog of this.settings.blogs) {
+      if (!this.hostOf(blog.url))
+        continue;
+      const from = (0, import_obsidian10.normalizePath)(blog.folder);
+      const to = this.defaultFolderFor(blog);
+      plans.push({ blog, from, to });
+    }
+    const owners = /* @__PURE__ */ new Map();
+    for (const { from } of plans) {
+      for (const f of this.app.vault.getMarkdownFiles()) {
+        if (owners.has(f.path) || this.isArchivePath(f.path))
+          continue;
+        if (f.path === from || f.path.startsWith(from + "/")) {
+          owners.set(f.path, (_b = (_a = this.organizeOwnerFor(f)) == null ? void 0 : _a.id) != null ? _b : "");
+        }
+      }
+    }
+    for (const { blog, from, to } of plans) {
+      if (from !== to) {
+        for (const [path, ownerId] of owners) {
+          if (ownerId !== blog.id)
+            continue;
+          if (path !== from && !path.startsWith(from + "/"))
+            continue;
+          const file = this.app.vault.getAbstractFileByPath(path);
+          if (!(file instanceof import_obsidian10.TFile))
+            continue;
+          const rel = path.startsWith(from + "/") ? path.slice(from.length + 1) : file.name;
+          const dest = (0, import_obsidian10.normalizePath)(`${to}/${rel}`);
+          if (dest === path)
+            continue;
+          const parent = dest.split("/").slice(0, -1).join("/");
+          if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
+            try {
+              await this.app.vault.createFolder(parent);
+            } catch (e) {
+            }
+          }
+          if (this.app.vault.getAbstractFileByPath(dest)) {
+            skipped++;
+            continue;
+          }
+          try {
+            await this.app.fileManager.renameFile(file, dest);
+            moved++;
+          } catch (e) {
+            console.error("[Ghost] organize move failed:", path, e);
+            skipped++;
+          }
+        }
+      }
+      blog.folder = to;
+      blog.folderAuto = true;
+    }
+    await this.saveSettings();
+    this.setupPeriodicSync();
+    return { moved, skipped };
   }
   restoreDefaultBlogContext() {
     const d = this.defaultBlog();
@@ -4582,8 +4705,14 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           })();
         });
       });
+      let folderInput = null;
       new import_obsidian10.Setting(containerEl).setName("Site address").addText((t) => t.setPlaceholder("https://yourblog.com").setValue(blog.url).onChange(async (v) => {
         blog.url = v.trim();
+        if (blog.folderAuto !== false) {
+          blog.folder = plugin.defaultFolderFor(blog);
+          if (folderInput)
+            folderInput.placeholder = blog.folder;
+        }
         await plugin.saveSettings();
       }));
       const hasKey = !!(blog.apiKeySecretName && plugin.loadApiKeyForSecret(blog.apiKeySecretName).trim());
@@ -4641,10 +4770,21 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           await plugin.saveSettings();
         });
       });
-      new import_obsidian10.Setting(containerEl).setName("Folder").setDesc("Vault folder for this blog's posts").addText((t) => t.setPlaceholder("Ghost posts").setValue(blog.folder).onChange(async (v) => {
-        blog.folder = v.trim();
-        await plugin.saveSettings();
-      }));
+      new import_obsidian10.Setting(containerEl).setName("Folder").setDesc("Vault folder for this blog's posts. Leave blank to derive it from the site address (root/domain).").addText((t) => {
+        folderInput = t.inputEl;
+        t.setPlaceholder(plugin.defaultFolderFor(blog)).setValue(blog.folderAuto !== false ? "" : blog.folder).onChange(async (v) => {
+          const val = v.trim();
+          if (val) {
+            blog.folder = (0, import_obsidian10.normalizePath)(val);
+            blog.folderAuto = false;
+          } else {
+            blog.folderAuto = true;
+            blog.folder = plugin.defaultFolderFor(blog);
+            t.inputEl.placeholder = blog.folder;
+          }
+          await plugin.saveSettings();
+        });
+      });
       new import_obsidian10.Setting(containerEl).setName("Auto-sync this folder").setDesc("When off, this folder is never auto-synced (manual sync still works).").addToggle((t) => t.setValue(blog.syncEnabled !== false).onChange(async (v) => {
         blog.syncEnabled = v;
         await plugin.saveSettings();
@@ -4668,12 +4808,29 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     });
     new import_obsidian10.Setting(containerEl).addButton((b) => b.setButtonText("Add blog").setCta().onClick(async () => {
       const id = plugin.genBlogId();
-      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: "Ghost Posts" };
+      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: plugin.ghostPostsRoot(), folderAuto: true };
       plugin.settings.blogs.push(blog);
       if (!plugin.settings.defaultBlogId)
         plugin.settings.defaultBlogId = blog.id;
       await plugin.saveSettings();
       this.display();
+    }));
+    new import_obsidian10.Setting(containerEl).setName("Organize folders by domain").setDesc(`Move each blog's notes into ${plugin.ghostPostsRoot()}/<domain> (derived from its site address) and point the blog folders there. Notes are moved with link updates.`).addButton((b) => b.setButtonText("Organize").onClick(() => {
+      new SimpleConfirmModal(
+        this.app,
+        "Organize blog folders?",
+        `Each blog's notes move into "${plugin.ghostPostsRoot()}/<domain>" and the blog folders switch to automatic (derived) mode. Vault links are updated as files move.`,
+        "Organize",
+        (ok) => {
+          if (!ok)
+            return;
+          void (async () => {
+            const { moved, skipped } = await plugin.organizeBlogFolders();
+            new import_obsidian10.Notice(`Organized: ${moved} note(s) moved${skipped ? `, ${skipped} skipped` : ""}`);
+            this.display();
+          })();
+        }
+      ).open();
     }));
   }
   display() {
@@ -4681,6 +4838,14 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     containerEl.empty();
     this.renderBlogsSettings(containerEl);
     new import_obsidian10.Setting(containerEl).setHeading().setName("Sync settings");
+    new import_obsidian10.Setting(containerEl).setName("Ghost posts root folder").setDesc('Folder that blog folders nest under: each blog with an automatic folder lives in root/domain (e.g. "Ghost Posts/chief.sc").').addText((text) => text.setPlaceholder("Ghost Posts").setValue(this.plugin.settings.syncFolder).onChange(async (value) => {
+      this.plugin.settings.syncFolder = value.trim() || "Ghost Posts";
+      for (const b of this.plugin.settings.blogs) {
+        if (b.folderAuto !== false)
+          b.folder = this.plugin.defaultFolderFor(b);
+      }
+      await this.plugin.saveSettings();
+    }));
     new import_obsidian10.Setting(containerEl).setName("Sync interval").setDesc("How often to check for changes (in minutes)").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.syncInterval)).onChange(async (value) => {
       const interval = parseInt(value);
       if (!isNaN(interval) && interval > 0) {
