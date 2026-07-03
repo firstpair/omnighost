@@ -624,8 +624,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 
 	async createNewGhostPost(): Promise<void> {
 		try {
-			// Ensure sync folder exists
-			const syncFolderPath = normalizePath(this.settings.syncFolder);
+			// Create in the default blog's folder (falls back to the root).
+			const syncFolderPath = normalizePath(this.defaultBlog()?.folder || this.settings.syncFolder);
 			const syncFolder = this.app.vault.getAbstractFileByPath(syncFolderPath);
 
 			if (!syncFolder) {
@@ -782,7 +782,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	/** Lowercased hostname of a URL, or '' if unparseable. */
-	private hostOf(url: string): string {
+	hostOf(url: string): string {
 		try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
 	}
 
@@ -796,6 +796,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const host = this.hostOf(blog.url);
 		const root = this.ghostPostsRoot();
 		return host ? normalizePath(`${root}/${host}`) : root;
+	}
+
+	/** True if any markdown file lives in this folder (or below). */
+	folderHasNotes(folder: string): boolean {
+		const f = normalizePath(folder || '');
+		if (!f || f === '/') return false;
+		return this.app.vault.getMarkdownFiles().some(x => x.path === f || x.path.startsWith(f + '/'));
 	}
 
 	/** Frontmatter-key-safe suffix for a blog name (e.g. "Chief Scientist" → "chief_scientist"). */
@@ -983,20 +990,39 @@ export default class GhostWriterManagerPlugin extends Plugin {
 
 	/** Resolve which blog(s) a note targets: its g_blog property, else the blog whose
 	 *  folder contains it (a note dropped in "Ghost Posts/chief.sc/" publishes there),
-	 *  else the default blog. */
+	 *  else the default blog. Notes directly under the shared root stay with the
+	 *  default blog — a blog whose folder IS the root never wins by location alone. */
 	resolveBlogsForFile(file: TFile): GhostBlog[] {
 		const explicit = this.explicitBlogsForFile(file);
 		if (explicit.length > 0) return explicit;
 		const inferred = this.blogForPath(file.path);
-		if (inferred) return [inferred];
+		if (inferred && normalizePath(inferred.folder) !== this.ghostPostsRoot()) return [inferred];
 		const def = this.defaultBlog();
 		return def ? [def] : [];
 	}
 
+	/** Move a note to `dest`, creating parent folders and de-colliding an occupied
+	 *  destination with a timestamp suffix. Uses fileManager.renameFile so vault
+	 *  links stay intact. Returns the final destination path, or null if no-op. */
+	private async moveNoteTo(file: TFile, dest: string): Promise<string | null> {
+		if (dest === file.path) return null;
+		const parent = dest.split('/').slice(0, -1).join('/');
+		if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
+			try { await this.app.vault.createFolder(parent); } catch { /* exists */ }
+		}
+		if (this.app.vault.getAbstractFileByPath(dest)) {
+			const slash = dest.lastIndexOf('/');
+			const dot = dest.lastIndexOf('.');
+			const stamp = Date.now();
+			dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
+		}
+		await this.app.fileManager.renameFile(file, dest);
+		return dest;
+	}
+
 	/** The single blog a note is filed under when organizing folders: its first
 	 *  explicit g_blog target, else the first blog it has a stored post id for,
-	 *  else the default blog. (Deliberately ignores path inference — the point
-	 *  is to decide where the file should move to.) */
+	 *  else the blog whose folder contains it, else the default blog. */
 	private organizeOwnerFor(file: TFile): GhostBlog | null {
 		const explicit = this.explicitBlogsForFile(file);
 		if (explicit.length > 0) return explicit[0];
@@ -1005,21 +1031,25 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			const withId = this.settings.blogs.find(b => this.readBlogId(fm, b));
 			if (withId) return withId;
 		}
+		const inferred = this.blogForPath(file.path);
+		if (inferred && normalizePath(inferred.folder) !== this.ghostPostsRoot()) return inferred;
 		return this.defaultBlog();
 	}
 
 	/** Move every blog's notes under "<root>/<domain>" and re-point the blog folders.
 	 *  Notes are moved with fileManager.renameFile so vault links stay intact. */
-	async organizeBlogFolders(): Promise<{ moved: number; skipped: number }> {
+	async organizeBlogFolders(): Promise<{ moved: number; failed: number }> {
 		let moved = 0;
-		let skipped = 0;
+		let failed = 0;
 		// Plan targets against the CURRENT layout before mutating any folder.
 		const plans: { blog: GhostBlog; from: string; to: string }[] = [];
+		const fromCounts = new Map<string, number>();
 		for (const blog of this.settings.blogs) {
 			if (!this.hostOf(blog.url)) continue; // no domain to derive a folder from
 			const from = normalizePath(blog.folder);
 			const to = this.defaultFolderFor(blog);
 			plans.push({ blog, from, to });
+			fromCounts.set(from, (fromCounts.get(from) ?? 0) + 1);
 		}
 		const owners = new Map<string, string>(); // file path → owning blog id
 		for (const { from } of plans) {
@@ -1038,19 +1068,24 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					const file = this.app.vault.getAbstractFileByPath(path);
 					if (!(file instanceof TFile)) continue;
 					const rel = path.startsWith(from + '/') ? path.slice(from.length + 1) : file.name;
-					const dest = normalizePath(`${to}/${rel}`);
-					if (dest === path) continue;
-					const parent = dest.split('/').slice(0, -1).join('/');
-					if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
-						try { await this.app.vault.createFolder(parent); } catch { /* exists */ }
-					}
-					if (this.app.vault.getAbstractFileByPath(dest)) { skipped++; continue; }
 					try {
-						await this.app.fileManager.renameFile(file, dest);
-						moved++;
+						if (await this.moveNoteTo(file, normalizePath(`${to}/${rel}`))) moved++;
 					} catch (e) {
 						console.error('[Ghost] organize move failed:', path, e);
-						skipped++;
+						failed++;
+					}
+				}
+				// The folder's archive moves with it — but only when the source folder
+				// belongs to exactly one blog (a shared archive would be ambiguous).
+				if (fromCounts.get(from) === 1) {
+					const archPrefix = `${from}/${this.archiveName()}/`;
+					for (const f of this.app.vault.getMarkdownFiles().filter(x => x.path.startsWith(archPrefix))) {
+						try {
+							if (await this.moveNoteTo(f, normalizePath(`${to}/${this.archiveName()}/${f.path.slice(archPrefix.length)}`))) moved++;
+						} catch (e) {
+							console.error('[Ghost] organize archive move failed:', f.path, e);
+							failed++;
+						}
 					}
 				}
 			}
@@ -1059,7 +1094,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 		await this.saveSettings();
 		this.setupPeriodicSync();
-		return { moved, skipped };
+		return { moved, failed };
 	}
 
 	private restoreDefaultBlogContext(): void {
@@ -1315,13 +1350,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		let count = 0;
 		for (const file of files) {
 			try {
-				let didChange = false;
-				await this.app.vault.process(file, (content) => {
-					const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
-					didChange = changed;
-					return changed ? migrated : content;
-				});
-				if (didChange) count++;
+				// Cheap no-op check first so unaffected notes are not rewritten.
+				const before = await this.app.vault.cachedRead(file);
+				if (!migrateFrontmatterPrefix(before, oldPrefix, newPrefix).changed) continue;
+				await this.app.vault.process(file, (content) => migrateFrontmatterPrefix(content, oldPrefix, newPrefix).content);
+				count++;
 			} catch (e) {
 				console.error('[Ghost] Prefix migration failed for', file.path, e);
 			}
@@ -1573,21 +1606,17 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			return;
 		}
 
-		// Check if file is in sync folder — move it if needed
-		const syncFolderPath = normalizePath(this.settings.syncFolder);
-		const currentFolder = file.parent?.path ?? '';
-
+		// A note already inside any blog's folder (or the root) stays where it is;
+		// otherwise move it into its target blog's folder.
 		let targetFile = file;
-		if (currentFolder !== syncFolderPath) {
-			new Notice(`Moving note to sync folder: ${this.settings.syncFolder}`);
-			if (!this.app.vault.getAbstractFileByPath(syncFolderPath)) {
-				await this.app.vault.createFolder(syncFolderPath);
-			}
-			const newPath = normalizePath(`${syncFolderPath}/${file.name}`);
-			await this.app.fileManager.renameFile(file, newPath);
-			const movedFile = this.app.vault.getFileByPath(newPath);
+		if (!this.fileInAnyBlogFolder(file)) {
+			const blog = this.resolveBlogsForFile(file)[0];
+			const folder = normalizePath((blog ? blog.folder : '') || this.settings.syncFolder);
+			new Notice(`Moving note to ${folder}`);
+			const newPath = await this.moveNoteTo(file, normalizePath(`${folder}/${file.name}`));
+			const movedFile = newPath ? this.app.vault.getFileByPath(newPath) : null;
 			if (!movedFile) {
-				new Notice('Failed to move file to sync folder.');
+				new Notice('Failed to move file to the blog folder.');
 				return;
 			}
 			targetFile = movedFile;
@@ -1609,36 +1638,26 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		try {
-			// Add Ghost properties (will add only missing ones)
-			let added = false;
-			await this.app.vault.process(file, (content) => {
-				const newContent = addGhostPropertiesToContent(content, this.settings);
-				added = newContent !== content;
-				return newContent;
-			});
-			if (!added) {
+			// No-op check first, so a note that already has every property
+			// is not rewritten (a write would bump mtime and trigger auto-sync).
+			const before = await this.app.vault.cachedRead(file);
+			if (addGhostPropertiesToContent(before, this.settings) === before) {
 				new Notice('This note already has all ghost properties');
 				return;
 			}
 
+			// Add Ghost properties (will add only missing ones)
+			await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
+
 			new Notice('Ghost properties added! This note will now sync with ghost.');
 
-			// Move file to sync folder if not already there
-			const syncFolderPath = normalizePath(this.settings.syncFolder);
-			const currentFolder = file.parent?.path || '';
-
-			if (currentFolder !== syncFolderPath) {
-				// Ensure sync folder exists
-				const syncFolder = this.app.vault.getAbstractFileByPath(syncFolderPath);
-				if (!syncFolder) {
-					await this.app.vault.createFolder(syncFolderPath);
-				}
-
-				// Move file
-				const newPath = normalizePath(`${syncFolderPath}/${file.name}`);
-				await this.app.fileManager.renameFile(file, newPath);
-
-				new Notice(`File moved to sync folder: ${this.settings.syncFolder}`);
+			// A note already inside any blog's folder (or the root) stays put;
+			// otherwise move it into its target blog's folder.
+			if (!this.fileInAnyBlogFolder(file)) {
+				const blog = this.resolveBlogsForFile(file)[0];
+				const folder = normalizePath((blog ? blog.folder : '') || this.settings.syncFolder);
+				const newPath = await this.moveNoteTo(file, normalizePath(`${folder}/${file.name}`));
+				if (newPath) new Notice(`File moved to ${folder}`);
 			}
 		} catch (error) {
 			console.error('Error adding Ghost properties:', error);
@@ -1735,19 +1754,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	/** Move a note into its blog's archive subfolder (instead of trashing it),
 	 *  preserving its frontmatter and adding an archive record. */
 	private async archiveNote(file: TFile): Promise<void> {
-		let dest = this.archiveTargetFor(file.path);
-		const parent = dest.split('/').slice(0, -1).join('/');
-		if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
-			try { await this.app.vault.createFolder(parent); } catch { /* exists */ }
-		}
-		if (this.app.vault.getAbstractFileByPath(dest)) {
-			const slash = dest.lastIndexOf('/');
-			const dot = dest.lastIndexOf('.');
-			const stamp = Date.now();
-			dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
-		}
 		const originalPath = file.path;
-		await this.app.fileManager.renameFile(file, dest);
+		const dest = await this.moveNoteTo(file, this.archiveTargetFor(file.path));
+		if (!dest) return;
 		const moved = this.app.vault.getAbstractFileByPath(dest);
 		if (moved instanceof TFile) {
 			try {
@@ -2355,14 +2364,44 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				});
 			let folderInput: HTMLInputElement | null = null;
 			new Setting(containerEl).setName('Site address')
-				.addText(t => t.setPlaceholder('https://yourblog.com').setValue(blog.url).onChange(async v => {
-					blog.url = v.trim();
-					if (blog.folderAuto !== false) {
-						blog.folder = plugin.defaultFolderFor(blog);
-						if (folderInput) folderInput.placeholder = blog.folder;
-					}
-					await plugin.saveSettings();
-				}));
+				.addText(t => {
+					let originalUrl = blog.url;
+					t.setPlaceholder('https://yourblog.com').setValue(blog.url).onChange(async v => {
+						blog.url = v.trim();
+						await plugin.saveSettings();
+					});
+					// Folder derivation and identity migration run on blur, not per
+					// keystroke — a half-typed URL must not re-point anything.
+					t.inputEl.addEventListener('blur', () => {
+						void (async () => {
+							const prevHost = plugin.hostOf(originalUrl);
+							const newHost = plugin.hostOf(blog.url);
+							if (newHost === prevHost) return;
+							originalUrl = blog.url;
+							// The domain is the blog's stable identity: keep the old one as
+							// an alias so existing g_blog tokens and g_id_<domain> keys
+							// still match after the address change.
+							if (prevHost) {
+								blog.aliases = blog.aliases || [];
+								if (!blog.aliases.includes(prevHost)) blog.aliases.push(prevHost);
+							}
+							if (blog.folderAuto !== false) {
+								const derived = plugin.defaultFolderFor(blog);
+								const cur = normalizePath(blog.folder || '');
+								// Re-point only when nothing can be stranded: the current
+								// folder is the shared root, or it holds no notes. Otherwise
+								// keep it — "Organize folders by domain" moves the notes.
+								if (cur === plugin.ghostPostsRoot() || !plugin.folderHasNotes(cur)) {
+									blog.folder = derived;
+								} else {
+									new Notice(`"${blog.name}": folder kept at ${cur} — run "Organize folders by domain" to move its notes to ${derived}`);
+								}
+								if (folderInput) folderInput.placeholder = plugin.defaultFolderFor(blog);
+							}
+							await plugin.saveSettings();
+						})();
+					});
+				});
 			const hasKey = !!(blog.apiKeySecretName && plugin.loadApiKeyForSecret(blog.apiKeySecretName).trim());
 			let pendingKey = '';
 			let keyInput: HTMLInputElement | null = null;
@@ -2472,8 +2511,8 @@ class GhostWriterSettingTab extends PluginSettingTab {
 					(ok) => {
 						if (!ok) return;
 						void (async () => {
-							const { moved, skipped } = await plugin.organizeBlogFolders();
-							new Notice(`Organized: ${moved} note(s) moved${skipped ? `, ${skipped} skipped` : ''}`);
+							const { moved, failed } = await plugin.organizeBlogFolders();
+							new Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED — those notes stayed put, see console` : ''}`);
 							this.display();
 						})();
 					}
@@ -2502,9 +2541,16 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.setPlaceholder('Ghost Posts')
 				.setValue(this.plugin.settings.syncFolder)
 				.onChange(async (value) => {
+					const oldRoot = this.plugin.ghostPostsRoot();
 					this.plugin.settings.syncFolder = value.trim() || 'Ghost Posts';
 					for (const b of this.plugin.settings.blogs) {
-						if (b.folderAuto !== false) b.folder = this.plugin.defaultFolderFor(b);
+						if (b.folderAuto === false) continue;
+						const cur = normalizePath(b.folder || '');
+						// Re-point only folders that cannot strand notes; populated
+						// folders keep their path until "Organize" moves the notes.
+						if (cur === oldRoot || !this.plugin.folderHasNotes(cur)) {
+							b.folder = this.plugin.defaultFolderFor(b);
+						}
 					}
 					await this.plugin.saveSettings();
 				}));

@@ -2941,8 +2941,9 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     }
   }
   async createNewGhostPost() {
+    var _a;
     try {
-      const syncFolderPath = (0, import_obsidian10.normalizePath)(this.settings.syncFolder);
+      const syncFolderPath = (0, import_obsidian10.normalizePath)(((_a = this.defaultBlog()) == null ? void 0 : _a.folder) || this.settings.syncFolder);
       const syncFolder = this.app.vault.getAbstractFileByPath(syncFolderPath);
       if (!syncFolder) {
         await this.app.vault.createFolder(syncFolderPath);
@@ -3103,6 +3104,13 @@ ${bodyMarkdown}`;
     const host = this.hostOf(blog.url);
     const root = this.ghostPostsRoot();
     return host ? (0, import_obsidian10.normalizePath)(`${root}/${host}`) : root;
+  }
+  /** True if any markdown file lives in this folder (or below). */
+  folderHasNotes(folder) {
+    const f = (0, import_obsidian10.normalizePath)(folder || "");
+    if (!f || f === "/")
+      return false;
+    return this.app.vault.getMarkdownFiles().some((x) => x.path === f || x.path.startsWith(f + "/"));
   }
   /** Frontmatter-key-safe suffix for a blog name (e.g. "Chief Scientist" → "chief_scientist"). */
   blogKeySuffix(name) {
@@ -3291,21 +3299,43 @@ ${bodyMarkdown}`;
   }
   /** Resolve which blog(s) a note targets: its g_blog property, else the blog whose
    *  folder contains it (a note dropped in "Ghost Posts/chief.sc/" publishes there),
-   *  else the default blog. */
+   *  else the default blog. Notes directly under the shared root stay with the
+   *  default blog — a blog whose folder IS the root never wins by location alone. */
   resolveBlogsForFile(file) {
     const explicit = this.explicitBlogsForFile(file);
     if (explicit.length > 0)
       return explicit;
     const inferred = this.blogForPath(file.path);
-    if (inferred)
+    if (inferred && (0, import_obsidian10.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
       return [inferred];
     const def = this.defaultBlog();
     return def ? [def] : [];
   }
+  /** Move a note to `dest`, creating parent folders and de-colliding an occupied
+   *  destination with a timestamp suffix. Uses fileManager.renameFile so vault
+   *  links stay intact. Returns the final destination path, or null if no-op. */
+  async moveNoteTo(file, dest) {
+    if (dest === file.path)
+      return null;
+    const parent = dest.split("/").slice(0, -1).join("/");
+    if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
+      try {
+        await this.app.vault.createFolder(parent);
+      } catch (e) {
+      }
+    }
+    if (this.app.vault.getAbstractFileByPath(dest)) {
+      const slash = dest.lastIndexOf("/");
+      const dot = dest.lastIndexOf(".");
+      const stamp = Date.now();
+      dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
+    }
+    await this.app.fileManager.renameFile(file, dest);
+    return dest;
+  }
   /** The single blog a note is filed under when organizing folders: its first
    *  explicit g_blog target, else the first blog it has a stored post id for,
-   *  else the default blog. (Deliberately ignores path inference — the point
-   *  is to decide where the file should move to.) */
+   *  else the blog whose folder contains it, else the default blog. */
   organizeOwnerFor(file) {
     var _a;
     const explicit = this.explicitBlogsForFile(file);
@@ -3317,21 +3347,26 @@ ${bodyMarkdown}`;
       if (withId)
         return withId;
     }
+    const inferred = this.blogForPath(file.path);
+    if (inferred && (0, import_obsidian10.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
+      return inferred;
     return this.defaultBlog();
   }
   /** Move every blog's notes under "<root>/<domain>" and re-point the blog folders.
    *  Notes are moved with fileManager.renameFile so vault links stay intact. */
   async organizeBlogFolders() {
-    var _a, _b;
+    var _a, _b, _c;
     let moved = 0;
-    let skipped = 0;
+    let failed = 0;
     const plans = [];
+    const fromCounts = /* @__PURE__ */ new Map();
     for (const blog of this.settings.blogs) {
       if (!this.hostOf(blog.url))
         continue;
       const from = (0, import_obsidian10.normalizePath)(blog.folder);
       const to = this.defaultFolderFor(blog);
       plans.push({ blog, from, to });
+      fromCounts.set(from, ((_a = fromCounts.get(from)) != null ? _a : 0) + 1);
     }
     const owners = /* @__PURE__ */ new Map();
     for (const { from } of plans) {
@@ -3339,7 +3374,7 @@ ${bodyMarkdown}`;
         if (owners.has(f.path) || this.isArchivePath(f.path))
           continue;
         if (f.path === from || f.path.startsWith(from + "/")) {
-          owners.set(f.path, (_b = (_a = this.organizeOwnerFor(f)) == null ? void 0 : _a.id) != null ? _b : "");
+          owners.set(f.path, (_c = (_b = this.organizeOwnerFor(f)) == null ? void 0 : _b.id) != null ? _c : "");
         }
       }
     }
@@ -3354,26 +3389,24 @@ ${bodyMarkdown}`;
           if (!(file instanceof import_obsidian10.TFile))
             continue;
           const rel = path.startsWith(from + "/") ? path.slice(from.length + 1) : file.name;
-          const dest = (0, import_obsidian10.normalizePath)(`${to}/${rel}`);
-          if (dest === path)
-            continue;
-          const parent = dest.split("/").slice(0, -1).join("/");
-          if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
-            try {
-              await this.app.vault.createFolder(parent);
-            } catch (e) {
-            }
-          }
-          if (this.app.vault.getAbstractFileByPath(dest)) {
-            skipped++;
-            continue;
-          }
           try {
-            await this.app.fileManager.renameFile(file, dest);
-            moved++;
+            if (await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${to}/${rel}`)))
+              moved++;
           } catch (e) {
             console.error("[Ghost] organize move failed:", path, e);
-            skipped++;
+            failed++;
+          }
+        }
+        if (fromCounts.get(from) === 1) {
+          const archPrefix = `${from}/${this.archiveName()}/`;
+          for (const f of this.app.vault.getMarkdownFiles().filter((x) => x.path.startsWith(archPrefix))) {
+            try {
+              if (await this.moveNoteTo(f, (0, import_obsidian10.normalizePath)(`${to}/${this.archiveName()}/${f.path.slice(archPrefix.length)}`)))
+                moved++;
+            } catch (e) {
+              console.error("[Ghost] organize archive move failed:", f.path, e);
+              failed++;
+            }
           }
         }
       }
@@ -3382,7 +3415,7 @@ ${bodyMarkdown}`;
     }
     await this.saveSettings();
     this.setupPeriodicSync();
-    return { moved, skipped };
+    return { moved, failed };
   }
   restoreDefaultBlogContext() {
     const d = this.defaultBlog();
@@ -3653,14 +3686,11 @@ ${body}`;
     let count = 0;
     for (const file of files) {
       try {
-        let didChange = false;
-        await this.app.vault.process(file, (content) => {
-          const { content: migrated, changed } = migrateFrontmatterPrefix(content, oldPrefix, newPrefix);
-          didChange = changed;
-          return changed ? migrated : content;
-        });
-        if (didChange)
-          count++;
+        const before = await this.app.vault.cachedRead(file);
+        if (!migrateFrontmatterPrefix(before, oldPrefix, newPrefix).changed)
+          continue;
+        await this.app.vault.process(file, (content) => migrateFrontmatterPrefix(content, oldPrefix, newPrefix).content);
+        count++;
       } catch (e) {
         console.error("[Ghost] Prefix migration failed for", file.path, e);
       }
@@ -3856,7 +3886,7 @@ ${bodyMarkdown}`;
     return this.app.vault.getFileByPath(newPath);
   }
   async syncCurrentNote(file) {
-    var _a, _b, _c, _d;
+    var _a, _b;
     if (!file) {
       new import_obsidian10.Notice("No active file");
       return;
@@ -3881,19 +3911,15 @@ ${bodyMarkdown}`;
       new import_obsidian10.Notice("Sync is disabled for this note (no_sync: true).");
       return;
     }
-    const syncFolderPath = (0, import_obsidian10.normalizePath)(this.settings.syncFolder);
-    const currentFolder = (_d = (_c = file.parent) == null ? void 0 : _c.path) != null ? _d : "";
     let targetFile = file;
-    if (currentFolder !== syncFolderPath) {
-      new import_obsidian10.Notice(`Moving note to sync folder: ${this.settings.syncFolder}`);
-      if (!this.app.vault.getAbstractFileByPath(syncFolderPath)) {
-        await this.app.vault.createFolder(syncFolderPath);
-      }
-      const newPath = (0, import_obsidian10.normalizePath)(`${syncFolderPath}/${file.name}`);
-      await this.app.fileManager.renameFile(file, newPath);
-      const movedFile = this.app.vault.getFileByPath(newPath);
+    if (!this.fileInAnyBlogFolder(file)) {
+      const blog = this.resolveBlogsForFile(file)[0];
+      const folder = (0, import_obsidian10.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
+      new import_obsidian10.Notice(`Moving note to ${folder}`);
+      const newPath = await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${folder}/${file.name}`));
+      const movedFile = newPath ? this.app.vault.getFileByPath(newPath) : null;
       if (!movedFile) {
-        new import_obsidian10.Notice("Failed to move file to sync folder.");
+        new import_obsidian10.Notice("Failed to move file to the blog folder.");
         return;
       }
       targetFile = movedFile;
@@ -3905,33 +3931,24 @@ ${bodyMarkdown}`;
     }
   }
   async addGhostPropertiesToCurrentNote(file) {
-    var _a;
     if (!file) {
       new import_obsidian10.Notice("No active file");
       return;
     }
     try {
-      let added = false;
-      await this.app.vault.process(file, (content) => {
-        const newContent = addGhostPropertiesToContent(content, this.settings);
-        added = newContent !== content;
-        return newContent;
-      });
-      if (!added) {
+      const before = await this.app.vault.cachedRead(file);
+      if (addGhostPropertiesToContent(before, this.settings) === before) {
         new import_obsidian10.Notice("This note already has all ghost properties");
         return;
       }
+      await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
       new import_obsidian10.Notice("Ghost properties added! This note will now sync with ghost.");
-      const syncFolderPath = (0, import_obsidian10.normalizePath)(this.settings.syncFolder);
-      const currentFolder = ((_a = file.parent) == null ? void 0 : _a.path) || "";
-      if (currentFolder !== syncFolderPath) {
-        const syncFolder = this.app.vault.getAbstractFileByPath(syncFolderPath);
-        if (!syncFolder) {
-          await this.app.vault.createFolder(syncFolderPath);
-        }
-        const newPath = (0, import_obsidian10.normalizePath)(`${syncFolderPath}/${file.name}`);
-        await this.app.fileManager.renameFile(file, newPath);
-        new import_obsidian10.Notice(`File moved to sync folder: ${this.settings.syncFolder}`);
+      if (!this.fileInAnyBlogFolder(file)) {
+        const blog = this.resolveBlogsForFile(file)[0];
+        const folder = (0, import_obsidian10.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
+        const newPath = await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${folder}/${file.name}`));
+        if (newPath)
+          new import_obsidian10.Notice(`File moved to ${folder}`);
       }
     } catch (error) {
       console.error("Error adding Ghost properties:", error);
@@ -4014,22 +4031,10 @@ ${bodyMarkdown}`;
   /** Move a note into its blog's archive subfolder (instead of trashing it),
    *  preserving its frontmatter and adding an archive record. */
   async archiveNote(file) {
-    let dest = this.archiveTargetFor(file.path);
-    const parent = dest.split("/").slice(0, -1).join("/");
-    if (parent && !this.app.vault.getAbstractFileByPath(parent)) {
-      try {
-        await this.app.vault.createFolder(parent);
-      } catch (e) {
-      }
-    }
-    if (this.app.vault.getAbstractFileByPath(dest)) {
-      const slash = dest.lastIndexOf("/");
-      const dot = dest.lastIndexOf(".");
-      const stamp = Date.now();
-      dest = dot > slash ? `${dest.slice(0, dot)}-${stamp}${dest.slice(dot)}` : `${dest}-${stamp}`;
-    }
     const originalPath = file.path;
-    await this.app.fileManager.renameFile(file, dest);
+    const dest = await this.moveNoteTo(file, this.archiveTargetFor(file.path));
+    if (!dest)
+      return;
     const moved = this.app.vault.getAbstractFileByPath(dest);
     if (moved instanceof import_obsidian10.TFile) {
       try {
@@ -4681,15 +4686,39 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         });
       });
       let folderInput = null;
-      new import_obsidian10.Setting(containerEl).setName("Site address").addText((t) => t.setPlaceholder("https://yourblog.com").setValue(blog.url).onChange(async (v) => {
-        blog.url = v.trim();
-        if (blog.folderAuto !== false) {
-          blog.folder = plugin.defaultFolderFor(blog);
-          if (folderInput)
-            folderInput.placeholder = blog.folder;
-        }
-        await plugin.saveSettings();
-      }));
+      new import_obsidian10.Setting(containerEl).setName("Site address").addText((t) => {
+        let originalUrl = blog.url;
+        t.setPlaceholder("https://yourblog.com").setValue(blog.url).onChange(async (v) => {
+          blog.url = v.trim();
+          await plugin.saveSettings();
+        });
+        t.inputEl.addEventListener("blur", () => {
+          void (async () => {
+            const prevHost = plugin.hostOf(originalUrl);
+            const newHost = plugin.hostOf(blog.url);
+            if (newHost === prevHost)
+              return;
+            originalUrl = blog.url;
+            if (prevHost) {
+              blog.aliases = blog.aliases || [];
+              if (!blog.aliases.includes(prevHost))
+                blog.aliases.push(prevHost);
+            }
+            if (blog.folderAuto !== false) {
+              const derived = plugin.defaultFolderFor(blog);
+              const cur = (0, import_obsidian10.normalizePath)(blog.folder || "");
+              if (cur === plugin.ghostPostsRoot() || !plugin.folderHasNotes(cur)) {
+                blog.folder = derived;
+              } else {
+                new import_obsidian10.Notice(`"${blog.name}": folder kept at ${cur} \u2014 run "Organize folders by domain" to move its notes to ${derived}`);
+              }
+              if (folderInput)
+                folderInput.placeholder = plugin.defaultFolderFor(blog);
+            }
+            await plugin.saveSettings();
+          })();
+        });
+      });
       const hasKey = !!(blog.apiKeySecretName && plugin.loadApiKeyForSecret(blog.apiKeySecretName).trim());
       let pendingKey = "";
       let keyInput = null;
@@ -4800,8 +4829,8 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           if (!ok)
             return;
           void (async () => {
-            const { moved, skipped } = await plugin.organizeBlogFolders();
-            new import_obsidian10.Notice(`Organized: ${moved} note(s) moved${skipped ? `, ${skipped} skipped` : ""}`);
+            const { moved, failed } = await plugin.organizeBlogFolders();
+            new import_obsidian10.Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED \u2014 those notes stayed put, see console` : ""}`);
             this.display();
           })();
         }
@@ -4814,10 +4843,15 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     this.renderBlogsSettings(containerEl);
     new import_obsidian10.Setting(containerEl).setHeading().setName("Sync settings");
     new import_obsidian10.Setting(containerEl).setName("Ghost posts root folder").setDesc('Folder that blog folders nest under: each blog with an automatic folder lives in root/domain (e.g. "Ghost Posts/chief.sc").').addText((text) => text.setPlaceholder("Ghost Posts").setValue(this.plugin.settings.syncFolder).onChange(async (value) => {
+      const oldRoot = this.plugin.ghostPostsRoot();
       this.plugin.settings.syncFolder = value.trim() || "Ghost Posts";
       for (const b of this.plugin.settings.blogs) {
-        if (b.folderAuto !== false)
+        if (b.folderAuto === false)
+          continue;
+        const cur = (0, import_obsidian10.normalizePath)(b.folder || "");
+        if (cur === oldRoot || !this.plugin.folderHasNotes(cur)) {
           b.folder = this.plugin.defaultFolderFor(b);
+        }
       }
       await this.plugin.saveSettings();
     }));
