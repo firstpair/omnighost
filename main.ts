@@ -558,8 +558,6 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			return '';
 		}
 
-		console.debug('[Ghost] Attempting to load secret:', this.settings.ghostApiKeySecretName);
-
 		try {
 			// Use the correct API: app.secretStorage.getSecret()
 			if (!this.app.secretStorage) {
@@ -575,8 +573,6 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				new Notice(`Secret "${this.settings.ghostApiKeySecretName}" not found in Keychain. Please create it in settings → Keychain.`);
 				return '';
 			}
-
-			console.debug('[Ghost] Successfully loaded secret (length:', apiKey.length, ')');
 
 			// Always keep the ghost client in sync with the current credentials
 			// so that any command invoked after plugin load uses the latest key.

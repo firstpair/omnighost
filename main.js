@@ -78,10 +78,6 @@ var GhostAPIClient = class {
     if (!id || !secret) {
       throw new Error("Invalid Admin API key format. Expected format: id:secret");
     }
-    console.debug("[Ghost JWT] Generating token...");
-    console.debug("[Ghost JWT] ID length:", id.length);
-    console.debug("[Ghost JWT] Secret length:", secret.length);
-    console.debug("[Ghost JWT] Secret is hex?", /^[0-9a-f]+$/i.test(secret));
     const header = {
       alg: "HS256",
       kid: id,
@@ -94,17 +90,11 @@ var GhostAPIClient = class {
       // 5 minutes
       aud: "/admin/"
     };
-    console.debug("[Ghost JWT] Payload:", payload);
     const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
     const encodedPayload = this.base64UrlEncode(JSON.stringify(payload));
-    console.debug("[Ghost JWT] Encoded header:", encodedHeader);
-    console.debug("[Ghost JWT] Encoded payload:", encodedPayload);
     const unsignedToken = `${encodedHeader}.${encodedPayload}`;
     const signature = await this.createSignature(unsignedToken, secret);
-    console.debug("[Ghost JWT] Signature:", signature);
-    const token = `${unsignedToken}.${signature}`;
-    console.debug("[Ghost JWT] Final token length:", token.length);
-    return token;
+    return `${unsignedToken}.${signature}`;
   }
   /**
    * Base64 URL encode
@@ -2911,7 +2901,6 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       console.warn("[Ghost] No secret name configured");
       return "";
     }
-    console.debug("[Ghost] Attempting to load secret:", this.settings.ghostApiKeySecretName);
     try {
       if (!this.app.secretStorage) {
         console.error("[Ghost] app.secretStorage is not available. Obsidian version may be too old.");
@@ -2924,7 +2913,6 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
         new import_obsidian10.Notice(`Secret "${this.settings.ghostApiKeySecretName}" not found in Keychain. Please create it in settings \u2192 Keychain.`);
         return "";
       }
-      console.debug("[Ghost] Successfully loaded secret (length:", apiKey.length, ")");
       (_a = this.ghostClient) == null ? void 0 : _a.updateCredentials(this.settings.ghostUrl, apiKey);
       return apiKey;
     } catch (error) {

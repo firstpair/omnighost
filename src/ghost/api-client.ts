@@ -45,11 +45,6 @@ export class GhostAPIClient {
 			throw new Error('Invalid Admin API key format. Expected format: id:secret');
 		}
 
-		console.debug('[Ghost JWT] Generating token...');
-		console.debug('[Ghost JWT] ID length:', id.length);
-		console.debug('[Ghost JWT] Secret length:', secret.length);
-		console.debug('[Ghost JWT] Secret is hex?', /^[0-9a-f]+$/i.test(secret));
-
 		// Generate JWT token
 		// Header (order matters for some JWT implementations)
 		const header = {
@@ -68,25 +63,15 @@ export class GhostAPIClient {
 			aud: '/admin/'
 		};
 
-		console.debug('[Ghost JWT] Payload:', payload);
-
 		// Encode header and payload
 		const encodedHeader = this.base64UrlEncode(JSON.stringify(header));
 		const encodedPayload = this.base64UrlEncode(JSON.stringify(payload));
-
-		console.debug('[Ghost JWT] Encoded header:', encodedHeader);
-		console.debug('[Ghost JWT] Encoded payload:', encodedPayload);
 
 		// Create signature
 		const unsignedToken = `${encodedHeader}.${encodedPayload}`;
 		const signature = await this.createSignature(unsignedToken, secret);
 
-		console.debug('[Ghost JWT] Signature:', signature);
-
-		const token = `${unsignedToken}.${signature}`;
-		console.debug('[Ghost JWT] Final token length:', token.length);
-
-		return token;
+		return `${unsignedToken}.${signature}`;
 	}
 
 	/**
