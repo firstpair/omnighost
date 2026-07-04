@@ -453,13 +453,34 @@ Omnighost can manage several Ghost sites at once — handy if you run a personal
 
 In **Settings → Omnighost**, the **Ghost blogs** section lets you **Add blog**. Each one gets its own name, site address, Admin API key (a keychain secret), folder in your vault, sync toggle, and optional interval. One blog is marked the default (★), and a **Test** button confirms each connection by name.
 
+Blog folders nest under one root. By default each blog’s folder derives from its site address as **`Ghost Posts/<domain>`** — `Ghost Posts/chief.sc`, `Ghost Posts/collected.ga` — so all your publishing lives under a single top-level folder. Leave a blog’s **Folder** field blank for the automatic path, or type your own to override it. If your blogs predate this layout and sit in scattered folders, the **Organize folders by domain** button in settings moves every blog’s notes (archives included) into place with links intact, and re-points the folders — nothing changes until you confirm.
+
 To choose where a note goes, run the command **“Set blog(s) for this note.”** A checklist appears; tick one or more blogs and confirm. Your choice is saved in the note’s **`g_blog`** property and sticks. If you tick several blogs, syncing the note publishes — and later updates — *all* of them at once. The last blog you pick becomes the default for the next new note.
+
+The folders themselves also route. A note with no `g_blog` property publishes to the blog whose folder it sits in — drag a draft into `Ghost Posts/chief.sc/` and that is where it goes. Notes directly under the root belong to the default blog. An explicit `g_blog` always wins over location.
 
 Selective sync has two levels. For one note, set `g_no_sync: true` and Omnighost leaves it alone. For a whole blog folder, turn off **Auto-sync this folder** in that blog’s settings; manual sync still works when you ask for it.
 
 To bring an existing site into Obsidian, run **“Import all posts from a ghost blog,”** choose one or more blogs, and every post arrives as a note in that blog’s folder, already tagged with its `g_blog` and per-blog id/URL keys. To import one post, use **Import post from ghost** with the Ghost editor URL. To connect an existing note to an existing Ghost post, use **Link note to ghost post** and choose whether Ghost overwrites the note or the note syncs up to Ghost.
 
 One thing to know: a note’s identity on each blog is its stored id, with the slug as the fallback before the first id is written. Keep slugs stable once a note is published widely. If you remove a blog from `g_blog` after the note has already published there, the next interactive sync warns about the orphaned Ghost post. You can delete it on Ghost, keep it by re-adding that blog, or decide later.
+
+</div>
+
+<div id="ch011.xhtml_importing-textpacks" class="section level2">
+
+## Importing textpacks
+
+A **textpack** is a small zip that bundles a Markdown post together with its images — the format writing apps like Ulysses use to move documents between devices. Omnighost imports textpacks directly, which makes it the last mile for drafts prepared elsewhere: a post written on a laptop, rendered diagrams and screenshots included, travels to your phone as one file and leaves it as a published post.
+
+There are two ways in:
+
+- **Import textpack** (command palette) opens a file picker. Choose the pack and a target blog, and the note is created on the spot.
+- Save the pack **into the vault** from any share sheet — in the Files app, long-press the pack, then *Share → Save to Files → your vault*. Omnighost imports it automatically: a scan at startup catches packs that arrived while Obsidian was closed, a live watcher catches ones saved while it is open, and the pack file itself moves to trash once the note exists. This is the practical route on iOS, where Obsidian cannot appear in the Files app’s “Open With…” menu. The behavior is governed by the **Auto-import textpacks** toggle (on by default), and an **“Import textpacks found in vault”** command runs the same sweep by hand.
+
+Either way the result is the same: the note lands in the blog’s folder with its Ghost properties already set, and its images are placed under `assets/<slug>/` next to it — they upload to Ghost automatically on the first sync, like any other local image. The note arrives as a *draft*, so nothing is published until you decide.
+
+A pack can also carry its own publishing instructions — blog, slug, tags, excerpt — embedded in the bundle’s metadata. Packs prepared with the companion `textpack.py` script (in the plugin repository, for building packs from a project’s blog posts) target the right blog by themselves: save the file, open Obsidian, sync, done.
 
 </div>
 
@@ -471,13 +492,13 @@ Publishing tools need a careful delete story. Omnighost never deletes remote pos
 
 ![Bulk delete is a checklist workflow with final confirmation, optional per-post prompts, and local archive support.](docs/book/diagrams/bulk-delete.png)
 
-Run **“Bulk delete posts (local notes + ghost)”** to choose one or more blogs. Omnighost lists the linked notes and Ghost posts it can find. Everything starts checked; uncheck anything you want to keep. When you confirm, Omnighost deletes only the selected Ghost posts. It also removes the selected local notes.
+Run **“Bulk delete posts (local notes + ghost)”** to choose one or more blogs. Omnighost lists the linked notes and Ghost posts it can find. Nothing is preselected — tick exactly the posts you want gone, or use the **Select all** checkbox at the top of the list. When you confirm, Omnighost deletes only the selected Ghost posts. It also removes the selected local notes.
 
 If **Archive deleted notes** is on, local notes move into an archive subfolder inside their blog folder instead of going to trash. Omnighost stamps them with archive metadata and `g_no_sync: true`, so archived notes are not accidentally re-published. If the archive option is off, the notes go to Obsidian trash.
 
 Two extra settings control how cautious the workflow is:
 
-- **Prompt on folder delete** — if you delete a folder of synced notes, Omnighost opens the same checklist for their linked Ghost posts. The notes are already gone locally, but the Ghost posts are still untouched until you confirm.
+- **Prompt on folder delete** — if you delete a folder of synced notes, Omnighost opens the same checklist for their linked Ghost posts. The notes are already gone locally, but the Ghost posts are still untouched until you confirm. Notes that merely *moved* elsewhere in the vault are tracked and never offered — deleting an old, emptied folder after reorganizing brings up nothing.
 - **Confirm each remote delete** — during a bulk delete, Omnighost shows each post and blog name with **Delete**, **Skip**, and **Stop**.
 
 </div>
