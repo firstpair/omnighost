@@ -2287,8 +2287,10 @@ class ImportTextpackModal extends Modal {
 		});
 
 		const status = contentEl.createEl('p', { text: 'No file selected.' });
+		// No `accept` filter: iOS greys out extensions it has no type mapping
+		// for (like .textpack), so allow any file and validate in the parser.
 		const input = contentEl.createEl('input', {
-			attr: { type: 'file', accept: '.textpack,.textbundle,.zip', 'aria-label': 'Textpack file' }
+			attr: { type: 'file', 'aria-label': 'Textpack file' }
 		});
 		input.addEventListener('change', () => {
 			void (async () => {

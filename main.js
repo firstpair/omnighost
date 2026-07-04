@@ -4713,7 +4713,7 @@ var ImportTextpackModal = class extends import_obsidian10.Modal {
     });
     const status = contentEl.createEl("p", { text: "No file selected." });
     const input = contentEl.createEl("input", {
-      attr: { type: "file", accept: ".textpack,.textbundle,.zip", "aria-label": "Textpack file" }
+      attr: { type: "file", "aria-label": "Textpack file" }
     });
     input.addEventListener("change", () => {
       void (async () => {
