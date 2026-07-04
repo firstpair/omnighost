@@ -2595,6 +2595,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.pendingDeletedFolders = [];
     this.app.workspace.onLayoutReady(() => this.rebuildGhostIndex());
     this.registerEvent(this.app.metadataCache.on("changed", (file) => this.indexFile(file)));
+    this.registerEvent(this.app.vault.on("rename", (af, oldPath) => this.reindexRenamed(af, (0, import_obsidian10.normalizePath)(oldPath))));
     this.registerEvent(
       this.app.vault.on("delete", (af) => {
         if (!this.settings.promptDeleteOnFolderDelete)
@@ -3523,6 +3524,7 @@ ${bodyMarkdown}`;
     }
     await this.saveSettings();
     this.setupPeriodicSync();
+    this.rebuildGhostIndex();
     return { moved, failed };
   }
   restoreDefaultBlogContext() {
@@ -4275,6 +4277,33 @@ ${bodyMarkdown}`;
         this.indexFile(f);
     }
   }
+  /** Re-key ghost-index entries when a note or folder is renamed/moved, so a
+   *  later folder delete never matches stale paths of notes that only moved. */
+  reindexRenamed(af, oldPath) {
+    if (!this.ghostIndex)
+      return;
+    if (af instanceof import_obsidian10.TFolder) {
+      const prefix = oldPath + "/";
+      for (const [path, entries2] of [...this.ghostIndex]) {
+        if (!path.startsWith(prefix))
+          continue;
+        this.ghostIndex.delete(path);
+        const np = (0, import_obsidian10.normalizePath)(`${af.path}/${path.slice(prefix.length)}`);
+        this.ghostIndex.set(np, entries2.map((e) => ({ ...e, path: np })));
+      }
+      return;
+    }
+    const entries = this.ghostIndex.get(oldPath);
+    this.ghostIndex.delete(oldPath);
+    if (af instanceof import_obsidian10.TFile && af.extension === "md" && this.fileInAnyBlogFolder(af)) {
+      const items = this.bulkItemsForFile(af);
+      if (items.length > 0) {
+        this.ghostIndex.set(af.path, items);
+      } else if (entries) {
+        this.ghostIndex.set(af.path, entries.map((e) => ({ ...e, path: af.path })));
+      }
+    }
+  }
   scheduleDeleteBatch() {
     if (this.deleteBatchTimer)
       window.clearTimeout(this.deleteBatchTimer);
@@ -4289,13 +4318,27 @@ ${bodyMarkdown}`;
     const folders = this.pendingDeletedFolders.splice(0).map((p) => p.replace(/\/+$/, ""));
     if (folders.length === 0 || !this.ghostIndex)
       return;
-    const items = [];
+    const inDeleted = (p) => folders.some((fp) => p === fp || p.startsWith(fp + "/"));
+    const live = /* @__PURE__ */ new Set();
     for (const [path, entries] of this.ghostIndex) {
-      if (!folders.some((fp) => path === fp || path.startsWith(fp + "/")))
+      if (inDeleted(path))
+        continue;
+      if (!(this.app.vault.getAbstractFileByPath(path) instanceof import_obsidian10.TFile))
         continue;
       for (const e of entries)
-        items.push({ ...e, path });
+        live.add(`${e.blogId}:${e.ghostId}`);
+    }
+    const items = [];
+    for (const [path, entries] of [...this.ghostIndex]) {
+      if (!inDeleted(path))
+        continue;
       this.ghostIndex.delete(path);
+      if (this.app.vault.getAbstractFileByPath(path))
+        continue;
+      for (const e of entries) {
+        if (!live.has(`${e.blogId}:${e.ghostId}`))
+          items.push({ ...e, path });
+      }
     }
     if (items.length === 0)
       return;

@@ -112,6 +112,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.pendingDeletedFolders = [];
 		this.app.workspace.onLayoutReady(() => this.rebuildGhostIndex());
 		this.registerEvent(this.app.metadataCache.on('changed', (file) => this.indexFile(file)));
+		this.registerEvent(this.app.vault.on('rename', (af, oldPath) => this.reindexRenamed(af, normalizePath(oldPath))));
 		this.registerEvent(
 			this.app.vault.on('delete', (af) => {
 				if (!this.settings.promptDeleteOnFolderDelete) return;
@@ -1102,6 +1103,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 		await this.saveSettings();
 		this.setupPeriodicSync();
+		// Re-key the delete-offer index to the new layout so deleting a now-empty
+		// old folder never surfaces the moved notes' posts.
+		this.rebuildGhostIndex();
 		return { moved, failed };
 	}
 
@@ -1886,6 +1890,34 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 	}
 
+	/** Re-key ghost-index entries when a note or folder is renamed/moved, so a
+	 *  later folder delete never matches stale paths of notes that only moved. */
+	private reindexRenamed(af: TAbstractFile, oldPath: string): void {
+		if (!this.ghostIndex) return;
+		if (af instanceof TFolder) {
+			const prefix = oldPath + '/';
+			for (const [path, entries] of [...this.ghostIndex]) {
+				if (!path.startsWith(prefix)) continue;
+				this.ghostIndex.delete(path);
+				const np = normalizePath(`${af.path}/${path.slice(prefix.length)}`);
+				this.ghostIndex.set(np, entries.map(e => ({ ...e, path: np })));
+			}
+			return;
+		}
+		const entries = this.ghostIndex.get(oldPath);
+		this.ghostIndex.delete(oldPath);
+		if (af instanceof TFile && af.extension === 'md' && this.fileInAnyBlogFolder(af)) {
+			const items = this.bulkItemsForFile(af);
+			if (items.length > 0) {
+				this.ghostIndex.set(af.path, items);
+			} else if (entries) {
+				// Metadata cache may not be re-keyed yet right after a move — carry
+				// the old entries over to the new path instead of losing them.
+				this.ghostIndex.set(af.path, entries.map(e => ({ ...e, path: af.path })));
+			}
+		}
+	}
+
 	private scheduleDeleteBatch(): void {
 		if (this.deleteBatchTimer) window.clearTimeout(this.deleteBatchTimer);
 		this.deleteBatchTimer = window.setTimeout(() => { void this.processDeleteBatch(); }, 400);
@@ -1897,11 +1929,23 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.deleteBatchTimer = undefined;
 		const folders = this.pendingDeletedFolders.splice(0).map(p => p.replace(/\/+$/, ''));
 		if (folders.length === 0 || !this.ghostIndex) return;
-		const items: BulkDeleteItem[] = [];
+		const inDeleted = (p: string) => folders.some(fp => p === fp || p.startsWith(fp + '/'));
+		// Posts whose note still exists elsewhere in the vault were moved, not
+		// deleted — never offer them for remote deletion.
+		const live = new Set<string>();
 		for (const [path, entries] of this.ghostIndex) {
-			if (!folders.some(fp => path === fp || path.startsWith(fp + '/'))) continue;
-			for (const e of entries) items.push({ ...e, path });
+			if (inDeleted(path)) continue;
+			if (!(this.app.vault.getAbstractFileByPath(path) instanceof TFile)) continue;
+			for (const e of entries) live.add(`${e.blogId}:${e.ghostId}`);
+		}
+		const items: BulkDeleteItem[] = [];
+		for (const [path, entries] of [...this.ghostIndex]) {
+			if (!inDeleted(path)) continue;
 			this.ghostIndex.delete(path);
+			if (this.app.vault.getAbstractFileByPath(path)) continue; // note still exists → stale entry
+			for (const e of entries) {
+				if (!live.has(`${e.blogId}:${e.ghostId}`)) items.push({ ...e, path });
+			}
 		}
 		if (items.length === 0) return;
 		new BulkDeleteModal(this.app, this, {
