@@ -20,5 +20,10 @@ fi
 for source in docs/book/diagrams/*.mmd; do
   [[ -f "$source" ]] || continue
   target="${source%.mmd}.png"
+  # Skip diagrams whose PNG is already up to date, so the book builds on
+  # machines without a headless browser when no diagram changed.
+  if [[ -f "$target" && ! "$source" -nt "$target" ]]; then
+    continue
+  fi
   mmdc -i "$source" -o "$target" -b white -s 2 -p "$config"
 done
