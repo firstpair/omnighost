@@ -4859,21 +4859,40 @@ var BulkDeleteModal = class extends import_obsidian10.Modal {
     super(app);
     this.plugin = plugin;
     this.opts = opts;
-    this.checked = opts.items.map(() => true);
+    this.checked = opts.items.map(() => false);
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: this.opts.heading });
     if (this.opts.subtext)
       contentEl.createEl("p", { text: this.opts.subtext });
+    const rowBoxes = [];
+    const master = contentEl.createEl("label", { cls: "omnighost-bulk-row omnighost-bulk-master" });
+    const masterCb = master.createEl("input", { attr: { type: "checkbox", "aria-label": "Select all" } });
+    master.createSpan({ text: ` Select all (${this.opts.items.length})` });
+    const syncMaster = () => {
+      const on = this.checked.filter(Boolean).length;
+      masterCb.checked = on === this.checked.length && on > 0;
+      masterCb.indeterminate = on > 0 && on < this.checked.length;
+    };
+    masterCb.onchange = () => {
+      const on = masterCb.checked;
+      this.checked = this.checked.map(() => on);
+      rowBoxes.forEach((cb) => {
+        cb.checked = on;
+      });
+      syncMaster();
+    };
     const list = contentEl.createDiv({ cls: "omnighost-bulk-list" });
     this.opts.items.forEach((it, i) => {
       const row2 = list.createEl("label", { cls: "omnighost-bulk-row" });
       const cb = row2.createEl("input", { attr: { type: "checkbox" } });
-      cb.checked = true;
+      cb.checked = false;
       cb.onchange = () => {
         this.checked[i] = cb.checked;
+        syncMaster();
       };
+      rowBoxes.push(cb);
       row2.createSpan({ text: ` ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
       row2.createEl("br");
     });

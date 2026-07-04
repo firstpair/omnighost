@@ -2425,18 +2425,37 @@ class BulkDeleteModal extends Modal {
 	private checked: boolean[];
 	constructor(app: App, private plugin: GhostWriterManagerPlugin, private opts: BulkDeleteOptions) {
 		super(app);
-		this.checked = opts.items.map(() => true);
+		// Destructive list: nothing is preselected — the user opts each post in.
+		this.checked = opts.items.map(() => false);
 	}
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.createEl('h3', { text: this.opts.heading });
 		if (this.opts.subtext) contentEl.createEl('p', { text: this.opts.subtext });
+
+		const rowBoxes: HTMLInputElement[] = [];
+		const master = contentEl.createEl('label', { cls: 'omnighost-bulk-row omnighost-bulk-master' });
+		const masterCb = master.createEl('input', { attr: { type: 'checkbox', 'aria-label': 'Select all' } });
+		master.createSpan({ text: ` Select all (${this.opts.items.length})` });
+		const syncMaster = () => {
+			const on = this.checked.filter(Boolean).length;
+			masterCb.checked = on === this.checked.length && on > 0;
+			masterCb.indeterminate = on > 0 && on < this.checked.length;
+		};
+		masterCb.onchange = () => {
+			const on = masterCb.checked;
+			this.checked = this.checked.map(() => on);
+			rowBoxes.forEach(cb => { cb.checked = on; });
+			syncMaster();
+		};
+
 		const list = contentEl.createDiv({ cls: 'omnighost-bulk-list' });
 		this.opts.items.forEach((it, i) => {
 			const row = list.createEl('label', { cls: 'omnighost-bulk-row' });
 			const cb = row.createEl('input', { attr: { type: 'checkbox' } });
-			cb.checked = true;
-			cb.onchange = () => { this.checked[i] = cb.checked; };
+			cb.checked = false;
+			cb.onchange = () => { this.checked[i] = cb.checked; syncMaster(); };
+			rowBoxes.push(cb);
 			row.createSpan({ text: ` ${it.title}  —  ${it.blogName}  (${it.published ? 'published' : 'draft'})` });
 			row.createEl('br');
 		});

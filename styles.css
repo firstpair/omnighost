@@ -597,3 +597,15 @@
 .omnighost-copy {
 	flex: 0 0 auto;
 }
+
+.omnighost-bulk-master {
+	display: block;
+	padding-bottom: 6px;
+	margin-bottom: 6px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-weight: var(--font-semibold, 600);
+}
+.omnighost-bulk-list {
+	max-height: 40vh;
+	overflow-y: auto;
+}
