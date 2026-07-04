@@ -11,6 +11,7 @@ import { MigratePrefixModal } from './src/modals/migrate-prefix-modal';
 import { SelectBlogsModal } from './src/modals/select-blogs-modal';
 import { upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, removeFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
 import { htmlToMarkdown } from './src/converters/html-to-markdown';
+import { parseTextpack, ParsedTextpack } from './src/importers/textpack';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
 
 // ⚠️ IMPORTANT: Set to false before production build/release
@@ -275,6 +276,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'import-all-posts',
 			name: 'Import all posts from a ghost blog',
 			callback: () => { this.openImportAllModal(); }
+		});
+
+		// Import a .textpack (zipped TextBundle: markdown + images) as a blog note
+		this.addCommand({
+			id: 'import-textpack',
+			name: 'Import textpack',
+			callback: () => { new ImportTextpackModal(this.app, this).open(); }
 		});
 
 		// Bulk delete: pick synced notes and remove their Ghost posts (and local notes)
@@ -1258,6 +1266,61 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		).open();
 	}
 
+	/** Import a parsed .textpack as a new note in `blog`'s folder: write its
+	 *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
+	 *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
+	async importTextpack(pack: ParsedTextpack, blog: GhostBlog): Promise<void> {
+		const prefix = this.settings.yamlPrefix;
+		const slug = (pack.ghost.slug || pack.name).toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'post';
+		const folder = normalizePath(blog.folder || this.settings.syncFolder);
+		const heading = pack.markdown.match(/^#\s+(.+)$/m);
+		const title = (heading ? heading[1] : pack.name).trim();
+		const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || slug;
+
+		let markdown = pack.markdown;
+		if (pack.assets.size > 0) {
+			const assetDir = normalizePath(`${folder}/assets/${slug}`);
+			if (!this.app.vault.getAbstractFileByPath(assetDir)) {
+				try { await this.app.vault.createFolder(assetDir); } catch { /* exists */ }
+			}
+			for (const [base, data] of pack.assets) {
+				const path = normalizePath(`${assetDir}/${base}`);
+				const buf = data.slice().buffer;
+				const existing = this.app.vault.getAbstractFileByPath(path);
+				if (existing instanceof TFile) await this.app.vault.modifyBinary(existing, buf);
+				else await this.app.vault.createBinary(path, buf);
+			}
+			// Bundle refs are assets/<file>; the note lives in the blog folder, so
+			// they resolve note-relatively once scoped by slug: assets/<slug>/<file>.
+			markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${slug}/`);
+		}
+
+		let content = addGhostPropertiesToContent(markdown, this.settings);
+		const esc = (s: string): string => s.replace(/\n/g, ' ').replace(/"/g, '\\"');
+		const upserts: Record<string, string> = {
+			[`${prefix}blog`]: this.blogPropertyYaml([blog]),
+			[`${prefix}slug`]: slug,
+		};
+		if (pack.ghost.tags && pack.ghost.tags.length > 0) {
+			upserts[`${prefix}tags`] = `[${pack.ghost.tags.map(t => `"${esc(t)}"`).join(', ')}]`;
+		}
+		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = `"${esc(pack.ghost.excerpt)}"`;
+		content = upsertFrontmatterKeys(content, upserts);
+
+		if (!this.app.vault.getAbstractFileByPath(folder)) {
+			try { await this.app.vault.createFolder(folder); } catch { /* exists */ }
+		}
+		let notePath = normalizePath(`${folder}/${fileName}.md`);
+		if (this.app.vault.getAbstractFileByPath(notePath)) {
+			notePath = normalizePath(`${folder}/${fileName}-${Date.now()}.md`);
+		}
+		const file = await this.app.vault.create(notePath, content);
+		await this.app.workspace.getLeaf(false).openFile(file);
+		const imgs = pack.assets.size;
+		new Notice(`Imported "${title}" → ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? '' : 's'})` : ''}`);
+	}
+
 	/** Picker to choose a blog (or blogs) to import all posts from. */
 	private openImportAllModal(): void {
 		const def = this.defaultBlog();
@@ -2206,6 +2269,71 @@ class SimpleConfirmModal extends Modal {
 	onClose(): void {
 		this.contentEl.empty();
 		if (!this.decided) this.onResult(false);
+	}
+}
+
+/** Pick a .textpack file and a target blog, then import it as a synced note. */
+class ImportTextpackModal extends Modal {
+	private parsed: ParsedTextpack | null = null;
+	private blogSelect: HTMLSelectElement | null = null;
+	constructor(app: App, private plugin: GhostWriterManagerPlugin) {
+		super(app);
+	}
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl('h3', { text: 'Import textpack' });
+		contentEl.createEl('p', {
+			text: 'Choose a .textpack file (a zipped text bundle). The note and its images land in the selected blog\'s folder, with ghost properties set, ready to sync.'
+		});
+
+		const status = contentEl.createEl('p', { text: 'No file selected.' });
+		const input = contentEl.createEl('input', {
+			attr: { type: 'file', accept: '.textpack,.textbundle,.zip', 'aria-label': 'Textpack file' }
+		});
+		input.addEventListener('change', () => {
+			void (async () => {
+				const f = input.files?.[0];
+				if (!f) return;
+				try {
+					this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
+					const hint = this.parsed.ghost.blog;
+					status.setText(`"${this.parsed.name}" — ${this.parsed.assets.size} image(s)${hint ? `, blog: ${hint}` : ''}`);
+					const hinted = hint
+						? this.plugin.settings.blogs.find(b => this.plugin.blogMatchesToken(b, hint))
+						: null;
+					if (hinted && this.blogSelect) this.blogSelect.value = hinted.id;
+				} catch (e) {
+					this.parsed = null;
+					status.setText(`Could not read file: ${(e as Error).message}`);
+				}
+			})();
+		});
+
+		new Setting(contentEl).setName('Import into blog').addDropdown(d => {
+			for (const b of this.plugin.settings.blogs) d.addOption(b.id, b.name || b.url || 'unnamed blog');
+			const def = this.plugin.defaultBlog();
+			if (def) d.setValue(def.id);
+			this.blogSelect = d.selectEl;
+		});
+
+		const row = contentEl.createDiv({ cls: 'modal-button-container' });
+		new ButtonComponent(row).setButtonText('Import').setCta().onClick(() => {
+			void (async () => {
+				if (!this.parsed) { new Notice('Choose a .textpack file first'); return; }
+				const blog = this.plugin.settings.blogs.find(b => b.id === this.blogSelect?.value) ?? this.plugin.defaultBlog();
+				if (!blog) { new Notice('No blog configured — add one in settings.'); return; }
+				this.close();
+				try {
+					await this.plugin.importTextpack(this.parsed, blog);
+				} catch (e) {
+					new Notice(`Import failed: ${(e as Error).message}`);
+				}
+			})();
+		});
+		new ButtonComponent(row).setButtonText('Cancel').onClick(() => this.close());
+	}
+	onClose(): void {
+		this.contentEl.empty();
 	}
 }
 

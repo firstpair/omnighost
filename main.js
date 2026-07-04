@@ -2369,6 +2369,107 @@ var SelectBlogsModal = class extends import_obsidian9.Modal {
   }
 };
 
+// src/importers/textpack.ts
+async function inflateRaw(data) {
+  const ds = new DecompressionStream("deflate-raw");
+  const stream = new Blob([data]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+async function readZip(buf) {
+  const view = new DataView(buf);
+  const bytes = new Uint8Array(buf);
+  let eocd = -1;
+  const scanFrom = Math.max(0, buf.byteLength - 22 - 65536);
+  for (let i = buf.byteLength - 22; i >= scanFrom; i--) {
+    if (view.getUint32(i, true) === 101010256) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0)
+    throw new Error("Not a zip file (no end-of-central-directory record)");
+  const entryCount = view.getUint16(eocd + 10, true);
+  const cdOffset = view.getUint32(eocd + 16, true);
+  const entries = [];
+  let p = cdOffset;
+  for (let i = 0; i < entryCount; i++) {
+    if (view.getUint32(p, true) !== 33639248)
+      throw new Error("Corrupt zip central directory");
+    const method = view.getUint16(p + 10, true);
+    const compressedSize = view.getUint32(p + 20, true);
+    const nameLen = view.getUint16(p + 28, true);
+    const extraLen = view.getUint16(p + 30, true);
+    const commentLen = view.getUint16(p + 32, true);
+    const localHeaderOffset = view.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(bytes.subarray(p + 46, p + 46 + nameLen));
+    entries.push({ name, method, compressedSize, localHeaderOffset });
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  const files = /* @__PURE__ */ new Map();
+  for (const e of entries) {
+    if (e.name.endsWith("/"))
+      continue;
+    const lh = e.localHeaderOffset;
+    if (view.getUint32(lh, true) !== 67324752)
+      throw new Error("Corrupt zip local header");
+    const nameLen = view.getUint16(lh + 26, true);
+    const extraLen = view.getUint16(lh + 28, true);
+    const dataStart = lh + 30 + nameLen + extraLen;
+    const raw = bytes.subarray(dataStart, dataStart + e.compressedSize);
+    if (e.method === 0) {
+      files.set(e.name, raw.slice());
+    } else if (e.method === 8) {
+      files.set(e.name, await inflateRaw(raw));
+    } else {
+      throw new Error(`Unsupported zip compression method ${e.method} for ${e.name}`);
+    }
+  }
+  return files;
+}
+async function parseTextpack(buf, fallbackName) {
+  var _a;
+  const files = await readZip(buf);
+  let markdown = null;
+  let name = fallbackName.replace(/\.(textpack|textbundle|zip)$/i, "");
+  let ghost = {};
+  const assets = /* @__PURE__ */ new Map();
+  for (const [path, data] of files) {
+    const parts = path.split("/").filter(Boolean);
+    if (parts[0] === "__MACOSX" || parts[parts.length - 1] === ".DS_Store")
+      continue;
+    if ((_a = parts[0]) == null ? void 0 : _a.endsWith(".textbundle")) {
+      name = parts[0].replace(/\.textbundle$/i, "");
+      parts.shift();
+    }
+    const rel = parts.join("/");
+    const base = parts[parts.length - 1];
+    if (/^text\.(markdown|md|txt)$/i.test(rel)) {
+      markdown = new TextDecoder().decode(data);
+    } else if (rel === "info.json") {
+      try {
+        const info = JSON.parse(new TextDecoder().decode(data));
+        const og = info["omnighost"];
+        if (og && typeof og === "object" && !Array.isArray(og)) {
+          const o = og;
+          ghost = {
+            blog: typeof o.blog === "string" ? o.blog : void 0,
+            slug: typeof o.slug === "string" ? o.slug : void 0,
+            tags: Array.isArray(o.tags) ? o.tags.map((t) => String(t)) : void 0,
+            excerpt: typeof o.excerpt === "string" ? o.excerpt : void 0
+          };
+        }
+      } catch (e) {
+      }
+    } else if (parts[0] === "assets" && base) {
+      assets.set(base, data);
+    }
+  }
+  if (markdown === null) {
+    throw new Error("No text.markdown found \u2014 is this a TextPack/TextBundle?");
+  }
+  return { name, markdown, assets, ghost };
+}
+
 // src/editor/paywall-decoration.ts
 var import_view = require("@codemirror/view");
 var import_state = require("@codemirror/state");
@@ -2635,6 +2736,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       name: "Import all posts from a ghost blog",
       callback: () => {
         this.openImportAllModal();
+      }
+    });
+    this.addCommand({
+      id: "import-textpack",
+      name: "Import textpack",
+      callback: () => {
+        new ImportTextpackModal(this.app, this).open();
       }
     });
     this.addCommand({
@@ -3587,6 +3695,63 @@ ${bodyMarkdown}`;
       }
     ).open();
   }
+  /** Import a parsed .textpack as a new note in `blog`'s folder: write its
+   *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
+   *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
+  async importTextpack(pack, blog) {
+    const prefix = this.settings.yamlPrefix;
+    const slug = (pack.ghost.slug || pack.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "post";
+    const folder = (0, import_obsidian10.normalizePath)(blog.folder || this.settings.syncFolder);
+    const heading = pack.markdown.match(/^#\s+(.+)$/m);
+    const title = (heading ? heading[1] : pack.name).trim();
+    const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, "").trim() || slug;
+    let markdown = pack.markdown;
+    if (pack.assets.size > 0) {
+      const assetDir = (0, import_obsidian10.normalizePath)(`${folder}/assets/${slug}`);
+      if (!this.app.vault.getAbstractFileByPath(assetDir)) {
+        try {
+          await this.app.vault.createFolder(assetDir);
+        } catch (e) {
+        }
+      }
+      for (const [base, data] of pack.assets) {
+        const path = (0, import_obsidian10.normalizePath)(`${assetDir}/${base}`);
+        const buf = data.slice().buffer;
+        const existing = this.app.vault.getAbstractFileByPath(path);
+        if (existing instanceof import_obsidian10.TFile)
+          await this.app.vault.modifyBinary(existing, buf);
+        else
+          await this.app.vault.createBinary(path, buf);
+      }
+      markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${slug}/`);
+    }
+    let content = addGhostPropertiesToContent(markdown, this.settings);
+    const esc = (s) => s.replace(/\n/g, " ").replace(/"/g, '\\"');
+    const upserts = {
+      [`${prefix}blog`]: this.blogPropertyYaml([blog]),
+      [`${prefix}slug`]: slug
+    };
+    if (pack.ghost.tags && pack.ghost.tags.length > 0) {
+      upserts[`${prefix}tags`] = `[${pack.ghost.tags.map((t) => `"${esc(t)}"`).join(", ")}]`;
+    }
+    if (pack.ghost.excerpt)
+      upserts[`${prefix}excerpt`] = `"${esc(pack.ghost.excerpt)}"`;
+    content = upsertFrontmatterKeys(content, upserts);
+    if (!this.app.vault.getAbstractFileByPath(folder)) {
+      try {
+        await this.app.vault.createFolder(folder);
+      } catch (e) {
+      }
+    }
+    let notePath = (0, import_obsidian10.normalizePath)(`${folder}/${fileName}.md`);
+    if (this.app.vault.getAbstractFileByPath(notePath)) {
+      notePath = (0, import_obsidian10.normalizePath)(`${folder}/${fileName}-${Date.now()}.md`);
+    }
+    const file = await this.app.vault.create(notePath, content);
+    await this.app.workspace.getLeaf(false).openFile(file);
+    const imgs = pack.assets.size;
+    new import_obsidian10.Notice(`Imported "${title}" \u2192 ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? "" : "s"})` : ""}`);
+  }
   /** Picker to choose a blog (or blogs) to import all posts from. */
   openImportAllModal() {
     const def = this.defaultBlog();
@@ -4531,6 +4696,80 @@ var SimpleConfirmModal = class extends import_obsidian10.Modal {
     this.contentEl.empty();
     if (!this.decided)
       this.onResult(false);
+  }
+};
+var ImportTextpackModal = class extends import_obsidian10.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.parsed = null;
+    this.blogSelect = null;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Import textpack" });
+    contentEl.createEl("p", {
+      text: "Choose a .textpack file (a zipped text bundle). The note and its images land in the selected blog's folder, with ghost properties set, ready to sync."
+    });
+    const status = contentEl.createEl("p", { text: "No file selected." });
+    const input = contentEl.createEl("input", {
+      attr: { type: "file", accept: ".textpack,.textbundle,.zip", "aria-label": "Textpack file" }
+    });
+    input.addEventListener("change", () => {
+      void (async () => {
+        var _a;
+        const f = (_a = input.files) == null ? void 0 : _a[0];
+        if (!f)
+          return;
+        try {
+          this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
+          const hint = this.parsed.ghost.blog;
+          status.setText(`"${this.parsed.name}" \u2014 ${this.parsed.assets.size} image(s)${hint ? `, blog: ${hint}` : ""}`);
+          const hinted = hint ? this.plugin.settings.blogs.find((b) => this.plugin.blogMatchesToken(b, hint)) : null;
+          if (hinted && this.blogSelect)
+            this.blogSelect.value = hinted.id;
+        } catch (e) {
+          this.parsed = null;
+          status.setText(`Could not read file: ${e.message}`);
+        }
+      })();
+    });
+    new import_obsidian10.Setting(contentEl).setName("Import into blog").addDropdown((d) => {
+      for (const b of this.plugin.settings.blogs)
+        d.addOption(b.id, b.name || b.url || "unnamed blog");
+      const def = this.plugin.defaultBlog();
+      if (def)
+        d.setValue(def.id);
+      this.blogSelect = d.selectEl;
+    });
+    const row = contentEl.createDiv({ cls: "modal-button-container" });
+    new import_obsidian10.ButtonComponent(row).setButtonText("Import").setCta().onClick(() => {
+      void (async () => {
+        var _a;
+        if (!this.parsed) {
+          new import_obsidian10.Notice("Choose a .textpack file first");
+          return;
+        }
+        const blog = (_a = this.plugin.settings.blogs.find((b) => {
+          var _a2;
+          return b.id === ((_a2 = this.blogSelect) == null ? void 0 : _a2.value);
+        })) != null ? _a : this.plugin.defaultBlog();
+        if (!blog) {
+          new import_obsidian10.Notice("No blog configured \u2014 add one in settings.");
+          return;
+        }
+        this.close();
+        try {
+          await this.plugin.importTextpack(this.parsed, blog);
+        } catch (e) {
+          new import_obsidian10.Notice(`Import failed: ${e.message}`);
+        }
+      })();
+    });
+    new import_obsidian10.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 var OrphanPostModal = class extends import_obsidian10.Modal {
