@@ -37,6 +37,7 @@ var DEFAULT_SETTINGS = {
   ghostApiKeySecretName: "ghost-api-key",
   syncFolder: "Ghost Posts",
   syncInterval: 15,
+  autoImportTextpacks: true,
   yamlPrefix: "ghost_",
   lastSync: 0,
   showSyncNotifications: true,
@@ -2606,6 +2607,19 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
         }
       })
     );
+    this.app.workspace.onLayoutReady(() => {
+      if (this.settings.autoImportTextpacks)
+        void this.importVaultTextpacks(false);
+      this.registerEvent(this.app.vault.on("create", (af) => {
+        if (!this.settings.autoImportTextpacks)
+          return;
+        if (af instanceof import_obsidian10.TFile && af.extension === "textpack") {
+          window.setTimeout(() => {
+            void this.importVaultTextpack(af);
+          }, 800);
+        }
+      }));
+    });
     this.statusBarItem = this.addStatusBarItem();
     this.updateStatusBar("idle");
     void this.setupPeriodicSync();
@@ -2744,6 +2758,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       name: "Import textpack",
       callback: () => {
         new ImportTextpackModal(this.app, this).open();
+      }
+    });
+    this.addCommand({
+      id: "import-vault-textpacks",
+      name: "Import textpacks found in vault",
+      callback: () => {
+        void this.importVaultTextpacks(true);
       }
     });
     this.addCommand({
@@ -3753,6 +3774,42 @@ ${bodyMarkdown}`;
     await this.app.workspace.getLeaf(false).openFile(file);
     const imgs = pack.assets.size;
     new import_obsidian10.Notice(`Imported "${title}" \u2192 ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? "" : "s"})` : ""}`);
+  }
+  /** Import one .textpack file that lives inside the vault, then trash the pack.
+   *  Target blog: the pack's own metadata, else the blog whose folder holds the
+   *  file, else the default blog. */
+  async importVaultTextpack(file) {
+    var _a;
+    if (!this.app.vault.getAbstractFileByPath(file.path))
+      return false;
+    try {
+      const buf = await this.app.vault.readBinary(file);
+      const pack = await parseTextpack(buf, file.name);
+      const hinted = pack.ghost.blog ? this.settings.blogs.find((b) => this.blogMatchesToken(b, pack.ghost.blog)) : null;
+      const blog = (_a = hinted != null ? hinted : this.blogForPath(file.path)) != null ? _a : this.defaultBlog();
+      if (!blog) {
+        new import_obsidian10.Notice(`Found ${file.name} but no blog is configured \u2014 add one in settings.`);
+        return false;
+      }
+      await this.importTextpack(pack, blog);
+      await this.app.fileManager.trashFile(file);
+      return true;
+    } catch (e) {
+      console.error("[Ghost] textpack import failed:", file.path, e);
+      new import_obsidian10.Notice(`Textpack import failed for ${file.name}: ${e.message}`);
+      return false;
+    }
+  }
+  /** Import every .textpack file currently in the vault. */
+  async importVaultTextpacks(notifyWhenNone) {
+    const packs = this.app.vault.getFiles().filter((f) => f.extension === "textpack");
+    if (packs.length === 0) {
+      if (notifyWhenNone)
+        new import_obsidian10.Notice("No .textpack files found in the vault.");
+      return;
+    }
+    for (const p of packs)
+      await this.importVaultTextpack(p);
   }
   /** Picker to choose a blog (or blogs) to import all posts from. */
   openImportAllModal() {
@@ -5162,6 +5219,10 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         this.plugin.settings.syncInterval = interval;
         await this.plugin.saveSettings();
       }
+    }));
+    new import_obsidian10.Setting(containerEl).setName("Auto-import textpacks").setDesc("When a .textpack file appears in the vault \u2014 for instance saved there from your phone \u2014 import it as a blog note and move the pack to trash.").addToggle((t) => t.setValue(this.plugin.settings.autoImportTextpacks).onChange(async (value) => {
+      this.plugin.settings.autoImportTextpacks = value;
+      await this.plugin.saveSettings();
     }));
     new import_obsidian10.Setting(containerEl).setName("YAML prefix").setDesc('Prefix for ghost metadata in frontmatter (e.g., "ghost_" will create ghost_status, ghost_tags)').addText((text) => text.setPlaceholder("Prefix used in YAML keys").setValue(this.plugin.settings.yamlPrefix).onChange(async (value) => {
       this.plugin.settings.yamlPrefix = value.trim();

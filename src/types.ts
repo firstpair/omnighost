@@ -30,6 +30,7 @@ export interface GhostWriterSettings {
 	syncFolder: string;
 
 	syncInterval: number; // in minutes
+	autoImportTextpacks: boolean; // import .textpack files that appear in the vault
 	yamlPrefix: string;
 	lastSync: number;
 	showSyncNotifications: boolean;
@@ -51,6 +52,7 @@ export const DEFAULT_SETTINGS: GhostWriterSettings = {
 	ghostApiKeySecretName: 'ghost-api-key',
 	syncFolder: 'Ghost Posts',
 	syncInterval: 15,
+	autoImportTextpacks: true,
 	yamlPrefix: 'ghost_',
 	lastSync: 0,
 	showSyncNotifications: true,

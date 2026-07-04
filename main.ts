@@ -123,6 +123,20 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			})
 		);
 
+		// Textpacks dropped into the vault (e.g. saved from the iOS Files app,
+		// where Obsidian cannot appear in "Open With…") are imported automatically:
+		// scan what arrived while the app was closed, then watch for new ones.
+		this.app.workspace.onLayoutReady(() => {
+			if (this.settings.autoImportTextpacks) void this.importVaultTextpacks(false);
+			this.registerEvent(this.app.vault.on('create', (af) => {
+				if (!this.settings.autoImportTextpacks) return;
+				if (af instanceof TFile && af.extension === 'textpack') {
+					// Small delay: Files/iCloud may still be flushing the copy.
+					window.setTimeout(() => { void this.importVaultTextpack(af); }, 800);
+				}
+			}));
+		});
+
 		// Add status bar item
 		this.statusBarItem = this.addStatusBarItem();
 		this.updateStatusBar('idle');
@@ -284,6 +298,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'import-textpack',
 			name: 'Import textpack',
 			callback: () => { new ImportTextpackModal(this.app, this).open(); }
+		});
+
+		// Import every .textpack file currently sitting in the vault
+		this.addCommand({
+			id: 'import-vault-textpacks',
+			name: 'Import textpacks found in vault',
+			callback: () => { void this.importVaultTextpacks(true); }
 		});
 
 		// Bulk delete: pick synced notes and remove their Ghost posts (and local notes)
@@ -1323,6 +1344,43 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		await this.app.workspace.getLeaf(false).openFile(file);
 		const imgs = pack.assets.size;
 		new Notice(`Imported "${title}" → ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? '' : 's'})` : ''}`);
+	}
+
+	/** Import one .textpack file that lives inside the vault, then trash the pack.
+	 *  Target blog: the pack's own metadata, else the blog whose folder holds the
+	 *  file, else the default blog. */
+	async importVaultTextpack(file: TFile): Promise<boolean> {
+		// The create event may race the trash() of a pack just imported.
+		if (!this.app.vault.getAbstractFileByPath(file.path)) return false;
+		try {
+			const buf = await this.app.vault.readBinary(file);
+			const pack = await parseTextpack(buf, file.name);
+			const hinted = pack.ghost.blog
+				? this.settings.blogs.find(b => this.blogMatchesToken(b, pack.ghost.blog as string))
+				: null;
+			const blog = hinted ?? this.blogForPath(file.path) ?? this.defaultBlog();
+			if (!blog) {
+				new Notice(`Found ${file.name} but no blog is configured — add one in settings.`);
+				return false;
+			}
+			await this.importTextpack(pack, blog);
+			await this.app.fileManager.trashFile(file);
+			return true;
+		} catch (e) {
+			console.error('[Ghost] textpack import failed:', file.path, e);
+			new Notice(`Textpack import failed for ${file.name}: ${(e as Error).message}`);
+			return false;
+		}
+	}
+
+	/** Import every .textpack file currently in the vault. */
+	async importVaultTextpacks(notifyWhenNone: boolean): Promise<void> {
+		const packs = this.app.vault.getFiles().filter(f => f.extension === 'textpack');
+		if (packs.length === 0) {
+			if (notifyWhenNone) new Notice('No .textpack files found in the vault.');
+			return;
+		}
+		for (const p of packs) await this.importVaultTextpack(p);
 	}
 
 	/** Picker to choose a blog (or blogs) to import all posts from. */
@@ -2760,6 +2818,16 @@ class GhostWriterSettingTab extends PluginSettingTab {
 						this.plugin.settings.syncInterval = interval;
 						await this.plugin.saveSettings();
 					}
+				}));
+
+		new Setting(containerEl)
+			.setName('Auto-import textpacks')
+			.setDesc('When a .textpack file appears in the vault — for instance saved there from your phone — import it as a blog note and move the pack to trash.')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.autoImportTextpacks)
+				.onChange(async (value) => {
+					this.plugin.settings.autoImportTextpacks = value;
+					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
