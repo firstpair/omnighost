@@ -51,6 +51,11 @@ var DEFAULT_SETTINGS = {
 
 // src/ghost/api-client.ts
 var import_obsidian = require("obsidian");
+var LARGE_IMAGE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
+var TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
+var MAX_UPLOAD_IMAGE_DIMENSION = 2400;
+var MIN_UPLOAD_IMAGE_DIMENSION = 1200;
+var COMPRESSIBLE_IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/webp"]);
 var GhostAPIClient = class {
   constructor(ghostUrl, apiKey, app) {
     this.apiUrl = ghostUrl;
@@ -173,21 +178,22 @@ var GhostAPIClient = class {
    */
   async uploadImage(data, filename, mimeType) {
     var _a, _b, _c;
+    const upload = await this.prepareImageUpload(data, filename, mimeType);
     const token = await this.generateToken();
     const url = `${this.apiUrl}/ghost/api/admin/images/upload/`;
     const boundary = `----GhostWriterManager${Math.random().toString(16).slice(2)}`;
     const encoder = new TextEncoder();
     const head = encoder.encode(
       `--${boundary}\r
-Content-Disposition: form-data; name="file"; filename="${filename}"\r
-Content-Type: ${mimeType}\r
+Content-Disposition: form-data; name="file"; filename="${this.escapeMultipartFilename(upload.filename)}"\r
+Content-Type: ${upload.mimeType}\r
 \r
 `
     );
     const tail = encoder.encode(`\r
 --${boundary}--\r
 `);
-    const image = new Uint8Array(data);
+    const image = new Uint8Array(upload.data);
     const body = new Uint8Array(head.length + image.length + tail.length);
     body.set(head, 0);
     body.set(image, head.length);
@@ -204,6 +210,9 @@ Content-Type: ${mimeType}\r
       throw: false
     });
     if (response.status !== 201 && response.status !== 200) {
+      if (response.status === 413) {
+        throw new Error(`Image upload failed: ${response.status}. The image is still too large for this Ghost endpoint after client compression (${this.formatBytes(upload.data.byteLength)} from ${this.formatBytes(upload.originalBytes)}). Use a smaller image or enable the large-photo upload proxy.`);
+      }
       throw new Error(`Image upload failed: ${response.status} ${response.text}`);
     }
     const uploaded = (_c = (_b = (_a = response.json) == null ? void 0 : _a.images) == null ? void 0 : _b[0]) == null ? void 0 : _c.url;
@@ -211,6 +220,135 @@ Content-Type: ${mimeType}\r
       throw new Error(`Image upload returned no URL: ${response.text}`);
     }
     return uploaded;
+  }
+  async prepareImageUpload(data, filename, mimeType) {
+    const originalBytes = data.byteLength;
+    const base = { data, filename, mimeType, originalBytes };
+    if (originalBytes < LARGE_IMAGE_THRESHOLD_BYTES || !COMPRESSIBLE_IMAGE_TYPES.has(mimeType)) {
+      return base;
+    }
+    try {
+      const compressed = await this.compressRasterImage(data, filename, mimeType);
+      if (compressed.data.byteLength < originalBytes) {
+        console.debug(
+          `[Ghost Images] Compressed ${filename} from ${this.formatBytes(originalBytes)} to ${this.formatBytes(compressed.data.byteLength)}`
+        );
+        return compressed;
+      }
+    } catch (error) {
+      console.warn(`[Ghost Images] Could not compress ${filename}; uploading original`, error);
+    }
+    return base;
+  }
+  async compressRasterImage(data, filename, mimeType) {
+    const image = await this.loadImage(data, mimeType);
+    const naturalWidth = image.naturalWidth || image.width;
+    const naturalHeight = image.naturalHeight || image.height;
+    if (!naturalWidth || !naturalHeight) {
+      throw new Error("Image has no readable dimensions");
+    }
+    let maxDimension = Math.min(MAX_UPLOAD_IMAGE_DIMENSION, Math.max(naturalWidth, naturalHeight));
+    let best = null;
+    for (let pass = 0; pass < 8; pass++) {
+      const scale = Math.min(1, maxDimension / Math.max(naturalWidth, naturalHeight));
+      const width = Math.max(1, Math.round(naturalWidth * scale));
+      const height = Math.max(1, Math.round(naturalHeight * scale));
+      const canvas = this.drawImageToCanvas(image, width, height);
+      for (const quality of [0.86, 0.78, 0.7, 0.62]) {
+        const blob = await this.canvasToBlob(canvas, "image/jpeg", quality);
+        if (!best || blob.size < best.size) {
+          best = blob;
+        }
+        if (blob.size <= TARGET_IMAGE_BYTES) {
+          return {
+            data: await this.blobToArrayBuffer(blob),
+            filename: this.withJpegExtension(filename),
+            mimeType: "image/jpeg",
+            originalBytes: data.byteLength
+          };
+        }
+      }
+      if (maxDimension <= MIN_UPLOAD_IMAGE_DIMENSION) {
+        break;
+      }
+      maxDimension = Math.max(MIN_UPLOAD_IMAGE_DIMENSION, Math.floor(maxDimension * 0.8));
+    }
+    if (!best) {
+      throw new Error("Canvas export failed");
+    }
+    return {
+      data: await this.blobToArrayBuffer(best),
+      filename: this.withJpegExtension(filename),
+      mimeType: "image/jpeg",
+      originalBytes: data.byteLength
+    };
+  }
+  loadImage(data, mimeType) {
+    const blob = new Blob([data], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(url);
+        resolve(image);
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Browser could not decode image"));
+      };
+      image.src = url;
+    });
+  }
+  drawImageToCanvas(image, width, height) {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Canvas 2D context unavailable");
+    }
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+    return canvas;
+  }
+  canvasToBlob(canvas, type, quality) {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("Canvas export returned no data"));
+        }
+      }, type, quality);
+    });
+  }
+  blobToArrayBuffer(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (reader.result instanceof ArrayBuffer) {
+          resolve(reader.result);
+        } else {
+          reject(new Error("Blob reader returned non-binary data"));
+        }
+      };
+      reader.onerror = () => {
+        var _a;
+        return reject((_a = reader.error) != null ? _a : new Error("Blob read failed"));
+      };
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+  withJpegExtension(filename) {
+    return filename.replace(/\.[^/.]+$/, "") + ".jpg";
+  }
+  escapeMultipartFilename(filename) {
+    return filename.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+  formatBytes(bytes) {
+    const mb = bytes / (1024 * 1024);
+    return `${mb.toFixed(mb >= 10 ? 0 : 1)} MB`;
   }
   /**
    * Look up a post by its slug. Returns null when no post has that slug.
