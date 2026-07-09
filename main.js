@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => GhostWriterManagerPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian10 = require("obsidian");
+var import_obsidian11 = require("obsidian");
 
 // src/types.ts
 var DEFAULT_SETTINGS = {
@@ -38,6 +38,8 @@ var DEFAULT_SETTINGS = {
   syncFolder: "Ghost Posts",
   syncInterval: 15,
   autoImportTextpacks: true,
+  syncTitleSource: "metadata",
+  syncUpdateSecondaryTitle: false,
   yamlPrefix: "ghost_",
   lastSync: 0,
   showSyncNotifications: true,
@@ -51,6 +53,35 @@ var DEFAULT_SETTINGS = {
 
 // src/ghost/api-client.ts
 var import_obsidian = require("obsidian");
+
+// src/ghost/url.ts
+var SCHEME_PATTERN = /^[a-z][a-z0-9+.-]*:\/\//i;
+function normalizeGhostSiteUrl(url) {
+  const trimmed = url.trim();
+  if (!trimmed)
+    return "";
+  const withScheme = SCHEME_PATTERN.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withScheme);
+    parsed.hash = "";
+    parsed.search = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch (e) {
+    return withScheme;
+  }
+}
+function ghostHostname(url) {
+  try {
+    return new URL(normalizeGhostSiteUrl(url)).hostname.replace(/^www\./, "").toLowerCase();
+  } catch (e) {
+    return "";
+  }
+}
+function buildGhostEditorUrl(ghostSiteUrl, postId) {
+  return `${normalizeGhostSiteUrl(ghostSiteUrl)}/ghost/#/editor/post/${postId}`;
+}
+
+// src/ghost/api-client.ts
 var LARGE_IMAGE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
 var TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
 var MAX_UPLOAD_IMAGE_DIMENSION = 2400;
@@ -58,7 +89,7 @@ var MIN_UPLOAD_IMAGE_DIMENSION = 1200;
 var COMPRESSIBLE_IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/webp"]);
 var GhostAPIClient = class {
   constructor(ghostUrl, apiKey, app) {
-    this.apiUrl = ghostUrl;
+    this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
     this.apiKey = apiKey;
     this.app = app;
   }
@@ -66,7 +97,7 @@ var GhostAPIClient = class {
    * Update credentials
    */
   updateCredentials(ghostUrl, apiKey) {
-    this.apiUrl = ghostUrl;
+    this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
     this.apiKey = apiKey;
   }
   /**
@@ -622,7 +653,7 @@ ${content}`;
 }
 
 // src/sync/sync-engine.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 
 // src/frontmatter-parser.ts
 function splitFrontmatter(fileContent) {
@@ -697,6 +728,13 @@ function removeFrontmatterKeys(fileContent, keys) {
     raw = raw.replace(pattern, "");
   }
   return joinFrontmatter(raw.replace(/\n{2,}/g, "\n").replace(/^\n+/, ""), body);
+}
+function yamlString(value, singleLine = false) {
+  const normalized = singleLine ? value.replace(/[\r\n]+/g, " ") : value;
+  return JSON.stringify(normalized);
+}
+function yamlStringArray(values, singleLine = false) {
+  return `[${values.map((value) => yamlString(value, singleLine)).join(", ")}]`;
 }
 function parseGhostMetadata(frontmatter, prefix) {
   console.debug("[Ghost Parse] Starting parse with prefix:", prefix);
@@ -959,12 +997,24 @@ function markdownToLexical(markdown) {
       continue;
     }
     if (line.startsWith(">")) {
-      const quoteLines = [];
+      const quoteParagraphs = [];
+      let quoteLines = [];
       while (i < lines.length && lines[i].startsWith(">")) {
-        quoteLines.push(lines[i].replace(/^>\s*/, ""));
+        const quoteLine = lines[i].replace(/^>\s?/, "");
+        if (quoteLine.trim() === "") {
+          if (quoteLines.length > 0) {
+            quoteParagraphs.push(quoteLines);
+            quoteLines = [];
+          }
+        } else {
+          quoteLines.push(quoteLine);
+        }
         i++;
       }
-      nodes.push(createQuote(quoteLines.join(" ")));
+      if (quoteLines.length > 0) {
+        quoteParagraphs.push(quoteLines);
+      }
+      nodes.push(createQuote(quoteParagraphs.map(joinParagraphLines)));
       continue;
     }
     const imageMatch = line.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
@@ -975,8 +1025,12 @@ function markdownToLexical(markdown) {
       i++;
       continue;
     }
-    nodes.push(createParagraph(line));
-    i++;
+    const paragraphLines = [];
+    while (i < lines.length && !isBlockStart(lines[i])) {
+      paragraphLines.push(lines[i]);
+      i++;
+    }
+    nodes.push(createParagraph(joinParagraphLines(paragraphLines)));
   }
   if (nodes.length === 0) {
     nodes.push(createParagraph(""));
@@ -992,6 +1046,29 @@ function markdownToLexical(markdown) {
     }
   };
   return JSON.stringify(lexical);
+}
+function isBlockStart(line) {
+  const trimmed = line.trim();
+  if (trimmed === "")
+    return true;
+  if (trimmed === "--members-only--")
+    return true;
+  if (/^(#{1,6})\s+(.+)$/.test(line))
+    return true;
+  if (/^[*\-+]\s+/.test(line))
+    return true;
+  if (/^\d+\.\s+/.test(line))
+    return true;
+  if (line.startsWith("```"))
+    return true;
+  if (line.startsWith(">"))
+    return true;
+  if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line))
+    return true;
+  return false;
+}
+function joinParagraphLines(lines) {
+  return lines.map((paragraphLine) => paragraphLine.trim()).join(" ");
 }
 function createHeading(text, level) {
   return {
@@ -1078,18 +1155,19 @@ function createCodeBlock(code, language) {
     caption: ""
   };
 }
-function createQuote(text) {
+function createQuote(paragraphs) {
+  const quoteParagraphs = paragraphs.length > 0 ? paragraphs : [""];
   return {
     type: "quote",
     version: 1,
-    children: [{
+    children: quoteParagraphs.map((text) => ({
       type: "paragraph",
       version: 1,
       children: parseInlineFormatting(text),
       direction: "ltr",
       format: "",
       indent: 0
-    }],
+    })),
     direction: "ltr",
     format: "",
     indent: 0
@@ -1342,6 +1420,106 @@ async function processPostImages(app, ghostClient, markdown, file, swallowCover,
   return { markdown: out, coverImageUrl, cacheUpdated };
 }
 
+// src/title-policy.ts
+var import_obsidian3 = require("obsidian");
+function analyzeTitleSources(content, fallbackTitle, metadataTitleOverride) {
+  var _a, _b, _c;
+  const metadataTitle = (_a = frontmatterTitle(content)) != null ? _a : cleanTitle(metadataTitleOverride);
+  const headingTitle = (_b = leadingH1(content)) == null ? void 0 : _b.title;
+  const fallback = (_c = cleanTitle(fallbackTitle)) != null ? _c : "Untitled post";
+  return {
+    metadataTitle,
+    headingTitle,
+    fallbackTitle: fallback,
+    hasConflict: !!metadataTitle && !!headingTitle && titleKey(metadataTitle) !== titleKey(headingTitle),
+    defaultSource: headingTitle ? "heading" : "metadata"
+  };
+}
+function analyzeTextpackTitle(pack) {
+  return analyzeTitleSources(pack.markdown, pack.name, pack.ghost.title);
+}
+function resolvePrimaryTitle(analysis, primarySource) {
+  var _a, _b;
+  if (primarySource === "heading" && analysis.headingTitle)
+    return analysis.headingTitle;
+  if (primarySource === "metadata" && analysis.metadataTitle)
+    return analysis.metadataTitle;
+  return (_b = (_a = analysis.headingTitle) != null ? _a : analysis.metadataTitle) != null ? _b : analysis.fallbackTitle;
+}
+function normalizeTextpackTitle(pack, options) {
+  const analysis = analyzeTextpackTitle(pack);
+  const title = resolvePrimaryTitle(analysis, options.primarySource);
+  let markdown = pack.markdown;
+  if (options.updateSecondary) {
+    markdown = updateSecondaryTitle(markdown, title, options.primarySource);
+  }
+  markdown = upsertFrontmatterKeys(markdown, { title: yamlString(title, true) });
+  markdown = removeMatchingLeadingH1(markdown, title);
+  return { title, markdown, source: options.primarySource };
+}
+function updateSecondaryTitle(content, title, primarySource) {
+  if (primarySource === "heading") {
+    return upsertFrontmatterKeys(content, { title: yamlString(title, true) });
+  }
+  return replaceLeadingH1(content, title);
+}
+function frontmatterTitle(content) {
+  const parsed = splitFrontmatter(content);
+  if (!parsed)
+    return void 0;
+  try {
+    const raw = (0, import_obsidian3.parseYaml)(parsed.raw);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw))
+      return void 0;
+    return cleanTitle(raw.title);
+  } catch (e) {
+    return void 0;
+  }
+}
+function leadingH1(content) {
+  const parsed = splitFrontmatter(content);
+  const body = parsed ? parsed.body : content;
+  const match = body.match(/^(\s*)#\s+([^\n]+?)[ \t]*(?:\n|$)(?:[ \t]*\n)*/);
+  if (!match)
+    return null;
+  const title = cleanTitle(match[2]);
+  if (!title)
+    return null;
+  return { title, fullMatch: match[0] };
+}
+function replaceLeadingH1(content, title) {
+  const parsed = splitFrontmatter(content);
+  const body = parsed ? parsed.body : content;
+  const heading = leadingH1(content);
+  if (!heading || !body.startsWith(heading.fullMatch))
+    return content;
+  const nextBody = `
+# ${title}
+
+${body.slice(heading.fullMatch.length).replace(/^\n+/, "")}`;
+  return parsed ? joinFrontmatter(parsed.raw, nextBody) : nextBody.replace(/^\n+/, "");
+}
+function removeMatchingLeadingH1(content, title) {
+  const parsed = splitFrontmatter(content);
+  const body = parsed ? parsed.body : content;
+  const heading = leadingH1(content);
+  if (!heading || titleKey(heading.title) !== titleKey(title) || !body.startsWith(heading.fullMatch)) {
+    return content;
+  }
+  const nextBody = `
+${body.slice(heading.fullMatch.length).replace(/^\n+/, "")}`;
+  return parsed ? joinFrontmatter(parsed.raw, nextBody) : nextBody.replace(/^\n+/, "");
+}
+function cleanTitle(value) {
+  if (typeof value !== "string")
+    return void 0;
+  const title = value.replace(/\s+/g, " ").trim();
+  return title || void 0;
+}
+function titleKey(title) {
+  return title.replace(/\s+/g, " ").trim();
+}
+
 // src/sync/sync-engine.ts
 var SyncEngine = class {
   constructor(app, settings, ghostClient, imageCache, saveImageCache) {
@@ -1357,7 +1535,7 @@ var SyncEngine = class {
     this.ghostClient = ghostClient;
     this.imageCache = imageCache;
     this.saveImageCache = saveImageCache;
-    this.activeBaseUrl = settings.ghostUrl;
+    this.activeBaseUrl = normalizeGhostSiteUrl(settings.ghostUrl);
     this.activeFolder = settings.syncFolder;
   }
   /**
@@ -1368,18 +1546,14 @@ var SyncEngine = class {
    */
   setActiveBlog(client, baseUrl, folder, writeBack, knownId, blogName = "") {
     this.ghostClient = client;
-    this.activeBaseUrl = baseUrl;
+    this.activeBaseUrl = normalizeGhostSiteUrl(baseUrl);
     this.activeFolder = folder;
     this.writeBack = writeBack;
     this.activeKnownId = knownId;
     this.activeBlogName = blogName;
   }
   activeBlogKeySuffix() {
-    let base = this.activeBlogName;
-    try {
-      base = new URL(this.activeBaseUrl).hostname.replace(/^www\./, "").toLowerCase() || base;
-    } catch (e) {
-    }
+    const base = ghostHostname(this.activeBaseUrl) || this.activeBlogName;
     return base.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "blog";
   }
   /**
@@ -1394,27 +1568,25 @@ var SyncEngine = class {
     var _a, _b, _c, _d, _e, _f;
     const post = await this.ghostClient.getPostBySlug(slug);
     if (!post) {
-      new import_obsidian3.Notice(`No Ghost post found with slug "${slug}"`);
+      new import_obsidian4.Notice(`No Ghost post found with slug "${slug}"`);
       return false;
     }
     const prefix = this.settings.yamlPrefix;
-    const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
-    const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${post.id}`;
+    const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, post.id);
     const blogSuffix = this.activeBlogKeySuffix();
     const isPublic = post.status === "published" || post.status === "scheduled";
     const tags = ((_a = post.tags) != null ? _a : []).map((t) => t.name);
-    const tagsYaml = tags.length > 0 ? `[${tags.map((t) => `"${t}"`).join(", ")}]` : "[]";
-    const excerpt = ((_b = post.excerpt) != null ? _b : "").replace(/[\r\n]+/g, " ").replace(/"/g, '\\"');
+    const tagsYaml = yamlStringArray(tags, true);
     const ghostFields = {
-      post_access: (_c = post.visibility) != null ? _c : "public",
+      post_access: (_b = post.visibility) != null ? _b : "public",
       published: isPublic ? "true" : "false",
-      published_at: `"${(_d = post.published_at) != null ? _d : ""}"`,
+      published_at: yamlString((_c = post.published_at) != null ? _c : "", true),
       featured: post.featured ? "true" : "false",
       tags: tagsYaml,
-      excerpt: `"${excerpt}"`,
-      feature_image: `"${(_e = post.feature_image) != null ? _e : ""}"`,
+      excerpt: yamlString((_d = post.excerpt) != null ? _d : "", true),
+      feature_image: yamlString((_e = post.feature_image) != null ? _e : "", true),
       no_sync: "false",
-      slug: post.slug,
+      slug: yamlString(post.slug, true),
       [`id_${blogSuffix}`]: post.id,
       [`url_${blogSuffix}`]: ghostEditorUrl
     };
@@ -1434,7 +1606,7 @@ ${bodyMarkdown}`) : `# ${title}
 ${bodyMarkdown}`;
     });
     if (this.settings.showSyncNotifications) {
-      new import_obsidian3.Notice(`Seeded from Ghost: "${title}"`);
+      new import_obsidian4.Notice(`Seeded from Ghost: "${title}"`);
     }
     console.debug(`[Ghost Sync] Seeded note from Ghost post ${post.id} (slug '${slug}')`);
     return true;
@@ -1459,11 +1631,12 @@ ${bodyMarkdown}`;
       const fmParsed = splitFrontmatter(content);
       if (fmParsed) {
         try {
-          const d = (0, import_obsidian3.parseYaml)(fmParsed.raw);
+          const d = (0, import_obsidian4.parseYaml)(fmParsed.raw);
           if (d && typeof d === "object")
             diskFm = d;
         } catch (e) {
           console.debug("[Ghost Sync] Disk frontmatter parse failed:", e);
+          throw new Error("Frontmatter YAML is invalid. Fix the red properties before syncing.");
         }
       }
       const cacheFm = (_a = cache.frontmatter) != null ? _a : {};
@@ -1505,8 +1678,8 @@ ${bodyMarkdown}`;
       const lexical = markdownToLexical(markdownContent);
       console.debug("[Ghost Sync] Lexical length:", lexical.length);
       console.debug("[Ghost Sync] Lexical preview:", lexical.substring(0, 200));
-      const h1 = markdownContent.match(/^#\s+(.+)$/m);
-      let title = (h1 ? h1[1].trim() : "") || file.basename;
+      const titleAnalysis = analyzeTitleSources(content, file.basename);
+      let title = resolvePrimaryTitle(titleAnalysis, this.settings.syncTitleSource);
       title = title.slice(0, 255);
       console.debug("[Ghost Sync] Extracted title:", title);
       const slug = (metadata.slug || generateSlug(title)).slice(0, 191);
@@ -1576,7 +1749,7 @@ ${bodyMarkdown}`;
         ghostPost = await this.ghostClient.updatePost(targetId, postData);
         if (this.settings.showSyncNotifications) {
           const label = this.activeBlogName ? `blog ${this.activeBlogName}` : "in ghost";
-          new import_obsidian3.Notice(`Updated ${label}: ${title}`);
+          new import_obsidian4.Notice(`Updated ${label}: ${title}`);
         }
         console.debug(`[Ghost Sync] Updated: ${title}`);
         const publicUrl = status === "published" || status === "scheduled" ? ghostPost.url || void 0 : void 0;
@@ -1585,8 +1758,7 @@ ${bodyMarkdown}`;
         const needsUrl = !metadata.ghost_url;
         const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
         if (this.writeBack && ownsClean && (needsId || needsUrl || needsPublic)) {
-          const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
-          const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
+          const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, targetId);
           const syncedPost = ghostPost;
           await this.app.vault.process(file, (raw) => {
             let updatedContent = raw;
@@ -1602,13 +1774,12 @@ ${bodyMarkdown}`;
         ghostPost = await this.ghostClient.createPost(postData);
         if (this.settings.showSyncNotifications) {
           const label = this.activeBlogName ? `blog ${this.activeBlogName}` : "in ghost";
-          new import_obsidian3.Notice(`Created ${label}: ${title}`);
+          new import_obsidian4.Notice(`Created ${label}: ${title}`);
         }
         console.debug(`[Ghost Sync] Created: ${title}`, ghostPost);
         if (this.writeBack) {
           const capturedGhostPost = ghostPost;
-          const baseUrl = this.activeBaseUrl.replace(/\/$/, "");
-          const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
+          const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, capturedGhostPost.id);
           const publicUrl = status === "published" || status === "scheduled" ? capturedGhostPost.url || void 0 : void 0;
           await this.app.vault.process(file, (raw) => {
             const updatedContent = updateFrontmatterWithGhostId(
@@ -1623,6 +1794,10 @@ ${bodyMarkdown}`;
         }
       }
       this.lastSyncedPost = ghostPost;
+      if (this.settings.syncUpdateSecondaryTitle) {
+        const primarySource = this.settings.syncTitleSource;
+        await this.app.vault.process(file, (raw) => updateSecondaryTitle(raw, title, primarySource));
+      }
       this.settings.lastSync = Date.now();
       (_e = this.onStatusChange) == null ? void 0 : _e.call(this, "success", `Synced: ${title}`);
       return true;
@@ -1630,7 +1805,7 @@ ${bodyMarkdown}`;
       console.error(`[Ghost Sync] Error syncing ${file.path}:`, error);
       if (this.settings.showSyncNotifications) {
         const where = this.activeBlogName ? ` \u2192 ${this.activeBlogName}` : "";
-        new import_obsidian3.Notice(`Failed to sync ${file.name}${where}: ${error.message}`);
+        new import_obsidian4.Notice(`Failed to sync ${file.name}${where}: ${error.message}`);
       }
       (_f = this.onStatusChange) == null ? void 0 : _f.call(this, "error", `Error: ${error.message}`);
       return false;
@@ -1644,17 +1819,17 @@ ${bodyMarkdown}`;
     try {
       const syncFolder = this.app.vault.getAbstractFileByPath(this.activeFolder);
       if (!syncFolder) {
-        new import_obsidian3.Notice(`Sync folder not found: ${this.activeFolder}`);
+        new import_obsidian4.Notice(`Sync folder not found: ${this.activeFolder}`);
         return results;
       }
       const files = this.app.vault.getMarkdownFiles().filter(
         (file) => file.path.startsWith(this.activeFolder)
       );
       if (files.length === 0) {
-        new import_obsidian3.Notice("No files to sync");
+        new import_obsidian4.Notice("No files to sync");
         return results;
       }
-      new import_obsidian3.Notice(`Syncing ${files.length} file(s)...`);
+      new import_obsidian4.Notice(`Syncing ${files.length} file(s)...`);
       for (const file of files) {
         const success = await this.syncFileToGhost(file);
         if (success) {
@@ -1663,10 +1838,10 @@ ${bodyMarkdown}`;
           results.failed++;
         }
       }
-      new import_obsidian3.Notice(`Sync complete: ${results.success} succeeded, ${results.failed} skipped/failed`);
+      new import_obsidian4.Notice(`Sync complete: ${results.success} succeeded, ${results.failed} skipped/failed`);
     } catch (error) {
       console.error("[Ghost Sync] Error in syncAllFiles:", error);
-      new import_obsidian3.Notice(`Sync failed: ${error.message}`);
+      new import_obsidian4.Notice(`Sync failed: ${error.message}`);
     }
     return results;
   }
@@ -1685,9 +1860,9 @@ ${bodyMarkdown}`;
 };
 
 // src/views/calendar-view.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 var CALENDAR_VIEW_TYPE = "ghost-editorial-calendar";
-var CalendarView = class extends import_obsidian4.ItemView {
+var CalendarView = class extends import_obsidian5.ItemView {
   constructor(leaf, settings, ghostClient) {
     super(leaf);
     this.settings = settings;
@@ -1737,7 +1912,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     const nav = header.createDiv({ cls: "ghost-calendar-nav" });
     const prevYearBtn = nav.createEl("button", { cls: "ghost-calendar-nav-btn" });
     prevYearBtn.setAttribute("aria-label", "Previous year");
-    (0, import_obsidian4.setIcon)(prevYearBtn, "chevrons-left");
+    (0, import_obsidian5.setIcon)(prevYearBtn, "chevrons-left");
     prevYearBtn.addEventListener("click", () => this.navigateYear(-1));
     prevYearBtn.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1747,7 +1922,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     });
     const prevMonthBtn = nav.createEl("button", { cls: "ghost-calendar-nav-btn" });
     prevMonthBtn.setAttribute("aria-label", "Previous month");
-    (0, import_obsidian4.setIcon)(prevMonthBtn, "chevron-left");
+    (0, import_obsidian5.setIcon)(prevMonthBtn, "chevron-left");
     prevMonthBtn.addEventListener("click", () => this.navigateMonth(-1));
     prevMonthBtn.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1759,7 +1934,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     this.updateMonthLabel();
     const nextMonthBtn = nav.createEl("button", { cls: "ghost-calendar-nav-btn" });
     nextMonthBtn.setAttribute("aria-label", "Next month");
-    (0, import_obsidian4.setIcon)(nextMonthBtn, "chevron-right");
+    (0, import_obsidian5.setIcon)(nextMonthBtn, "chevron-right");
     nextMonthBtn.addEventListener("click", () => this.navigateMonth(1));
     nextMonthBtn.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1769,7 +1944,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     });
     const nextYearBtn = nav.createEl("button", { cls: "ghost-calendar-nav-btn" });
     nextYearBtn.setAttribute("aria-label", "Next year");
-    (0, import_obsidian4.setIcon)(nextYearBtn, "chevrons-right");
+    (0, import_obsidian5.setIcon)(nextYearBtn, "chevrons-right");
     nextYearBtn.addEventListener("click", () => this.navigateYear(1));
     nextYearBtn.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -1794,7 +1969,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     });
     const refreshBtn = toolbar.createEl("button", { cls: "ghost-calendar-refresh-btn" });
     refreshBtn.setAttribute("aria-label", "Refresh calendar");
-    (0, import_obsidian4.setIcon)(refreshBtn, "refresh-cw");
+    (0, import_obsidian5.setIcon)(refreshBtn, "refresh-cw");
     refreshBtn.addEventListener("click", () => {
       void this.refresh();
     });
@@ -1814,10 +1989,9 @@ var CalendarView = class extends import_obsidian4.ItemView {
       rawPosts = await this.ghostClient.getPosts(filter, "all");
     } catch (error) {
       console.error("[Ghost Calendar] Failed to load posts:", error);
-      new import_obsidian4.Notice("Ghost calendar: could not load posts. Check your credentials.");
+      new import_obsidian5.Notice("Ghost calendar: could not load posts. Check your credentials.");
     }
     const vaultIndex = this.buildVaultIndex();
-    const baseUrl = this.settings.ghostUrl.replace(/\/$/, "");
     this.posts = rawPosts.filter((p) => p.published_at !== null).map((p) => {
       var _a;
       return {
@@ -1826,7 +2000,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
         status: p.status,
         publishedAt: new Date(p.published_at),
         vaultFile: (_a = vaultIndex.get(p.id)) != null ? _a : null,
-        ghostAdminUrl: `${baseUrl}/ghost/#/editor/post/${p.id}`
+        ghostAdminUrl: buildGhostEditorUrl(this.settings.ghostUrl, p.id)
       };
     }).sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
   }
@@ -1988,7 +2162,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
       cls: "ghost-calendar-post-link",
       text: post.title
     });
-    if (post.vaultFile instanceof import_obsidian4.TFile) {
+    if (post.vaultFile instanceof import_obsidian5.TFile) {
       const vaultFile = post.vaultFile;
       titleLink.setAttribute("href", "#");
       titleLink.addEventListener("click", (e) => {
@@ -2006,7 +2180,7 @@ var CalendarView = class extends import_obsidian4.ItemView {
     extLink.setAttribute("target", "_blank");
     extLink.setAttribute("rel", "noopener noreferrer");
     extLink.setAttribute("aria-label", "Open in ghost admin");
-    (0, import_obsidian4.setIcon)(extLink, "external-link");
+    (0, import_obsidian5.setIcon)(extLink, "external-link");
     return item;
   }
   async goToToday() {
@@ -2046,16 +2220,12 @@ var CalendarView = class extends import_obsidian4.ItemView {
 };
 
 // src/modals/import-from-ghost-modal.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 function extractPostIdFromUrl(url) {
   const match = url.match(/\/editor\/post\/([a-f0-9]+)\/?$/i);
   return match ? match[1] : null;
 }
-function buildGhostEditorUrl(ghostSiteUrl, postId) {
-  const base = ghostSiteUrl.replace(/\/$/, "");
-  return `${base}/ghost/#/editor/post/${postId}`;
-}
-var ImportFromGhostModal = class extends import_obsidian5.Modal {
+var ImportFromGhostModal = class extends import_obsidian6.Modal {
   constructor(app, ghostClient, settings, onImport, plugin) {
     super(app);
     this.urlInput = "";
@@ -2072,7 +2242,7 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
       text: "Paste the ghost editor URL of the post you want to import.",
       cls: "ghost-modal-description"
     });
-    new import_obsidian5.Setting(contentEl).setName("Ghost editor URL").setDesc("Example: https://yourblog.com/ghost/#/editor/post/6995c2b518d3e00001e1ca21").addText((text) => {
+    new import_obsidian6.Setting(contentEl).setName("Ghost editor URL").setDesc("Example: https://yourblog.com/ghost/#/editor/post/6995c2b518d3e00001e1ca21").addText((text) => {
       text.setPlaceholder("https://yourblog.com/ghost/#/editor/post/...").onChange((value) => {
         this.urlInput = value.trim();
       });
@@ -2084,7 +2254,7 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
         }
       });
     });
-    const buttonSetting = new import_obsidian5.Setting(contentEl).addButton((btn) => {
+    const buttonSetting = new import_obsidian6.Setting(contentEl).addButton((btn) => {
       btn.setButtonText("Import post").setCta().onClick(() => {
         void this.handleImport();
       });
@@ -2100,12 +2270,12 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
   async handleImport() {
     var _a, _b;
     if (!this.urlInput) {
-      new import_obsidian5.Notice("Please enter a ghost editor URL");
+      new import_obsidian6.Notice("Please enter a ghost editor URL");
       return;
     }
     const postId = extractPostIdFromUrl(this.urlInput);
     if (!postId) {
-      new import_obsidian5.Notice("Invalid ghost editor URL. Make sure it contains /editor/post/{id}");
+      new import_obsidian6.Notice("Invalid ghost editor URL. Make sure it contains /editor/post/{id}");
       return;
     }
     const blog = this.plugin ? this.plugin.blogForUrl(this.urlInput) : null;
@@ -2113,12 +2283,12 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
     const baseUrl = blog ? blog.url : this.settings.ghostUrl;
     const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
     try {
-      new import_obsidian5.Notice("Fetching post from ghost...");
+      new import_obsidian6.Notice("Fetching post from ghost...");
       const post = await client.getPost(postId);
       this.close();
       await this.onImport(post, ghostUrl, blog);
     } catch (error) {
-      new import_obsidian5.Notice(`Failed to fetch post: ${error.message}`);
+      new import_obsidian6.Notice(`Failed to fetch post: ${error.message}`);
     }
   }
   onClose() {
@@ -2128,8 +2298,8 @@ var ImportFromGhostModal = class extends import_obsidian5.Modal {
 };
 
 // src/modals/link-to-ghost-modal.ts
-var import_obsidian6 = require("obsidian");
-var LinkToGhostModal = class extends import_obsidian6.Modal {
+var import_obsidian7 = require("obsidian");
+var LinkToGhostModal = class extends import_obsidian7.Modal {
   constructor(app, ghostClient, settings, onLink, plugin) {
     super(app);
     this.source = "ghost";
@@ -2154,7 +2324,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
       text: "Relate existing content between ghost and Obsidian.",
       cls: "ghost-modal-description"
     });
-    new import_obsidian6.Setting(contentEl).setName("Primary source").setDesc("The primary source will overwrite the destination.").addDropdown((drop) => {
+    new import_obsidian7.Setting(contentEl).setName("Primary source").setDesc("The primary source will overwrite the destination.").addDropdown((drop) => {
       drop.addOption("ghost", "Ghost").addOption("obsidian", "Obsidian").setValue(this.source).onChange((value) => {
         this.source = value;
         this.renderFields();
@@ -2168,7 +2338,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
     });
     warning.createEl("strong", { text: "Caution: " });
     warning.appendText("The primary source will completely overwrite the content of the destination.");
-    const buttonSetting = new import_obsidian6.Setting(contentEl).addButton((btn) => {
+    const buttonSetting = new import_obsidian7.Setting(contentEl).addButton((btn) => {
       btn.setButtonText("Continue").setCta().onClick(() => {
         void this.handleLink();
       });
@@ -2196,7 +2366,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
     }
   }
   renderGhostField(container) {
-    new import_obsidian6.Setting(container).setName("Choose the post in ghost").setDesc("Paste the ghost editor URL (e.g., https://yourblog.com/ghost/#/editor/post/...)").addText((text) => {
+    new import_obsidian7.Setting(container).setName("Choose the post in ghost").setDesc("Paste the ghost editor URL (e.g., https://yourblog.com/ghost/#/editor/post/...)").addText((text) => {
       text.setPlaceholder("https://yourblog.com/ghost/#/editor/post/...").setValue(this.ghostUrlInput).onChange((value) => {
         this.ghostUrlInput = value.trim();
       });
@@ -2206,7 +2376,7 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
   }
   renderObsidianField(container) {
     const fieldWrapper = container.createDiv({ cls: "ghost-obsidian-field-wrapper" });
-    new import_obsidian6.Setting(fieldWrapper).setName("Choose the note in Obsidian").setDesc("Type to search for a note in your vault.").addText((text) => {
+    new import_obsidian7.Setting(fieldWrapper).setName("Choose the note in Obsidian").setDesc("Type to search for a note in your vault.").addText((text) => {
       text.setPlaceholder("Note name...").setValue(this.obsidianNoteInput).onChange((value) => {
         this.obsidianNoteInput = value;
         this.selectedFile = null;
@@ -2264,17 +2434,17 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
   async handleLink() {
     var _a, _b, _c, _d;
     if (!this.ghostUrlInput) {
-      new import_obsidian6.Notice("Please enter a ghost editor URL");
+      new import_obsidian7.Notice("Please enter a ghost editor URL");
       return;
     }
     const postId = extractPostIdFromUrl(this.ghostUrlInput);
     if (!postId) {
-      new import_obsidian6.Notice("Invalid ghost editor URL. Make sure it contains /editor/post/{id}");
+      new import_obsidian7.Notice("Invalid ghost editor URL. Make sure it contains /editor/post/{id}");
       return;
     }
     const obsidianFile = (_b = (_a = this.selectedFile) != null ? _a : this.app.vault.getMarkdownFiles().find((f) => f.basename === this.obsidianNoteInput)) != null ? _b : null;
     if (!obsidianFile) {
-      new import_obsidian6.Notice("Note not found. Please select a valid note from the suggestions.");
+      new import_obsidian7.Notice("Note not found. Please select a valid note from the suggestions.");
       return;
     }
     const blog = this.plugin ? this.plugin.blogForUrl(this.ghostUrlInput) : null;
@@ -2282,12 +2452,12 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
     const baseUrl = blog ? blog.url : this.settings.ghostUrl;
     const ghostUrl = buildGhostEditorUrl(baseUrl, postId);
     try {
-      new import_obsidian6.Notice("Fetching post from ghost...");
+      new import_obsidian7.Notice("Fetching post from ghost...");
       const post = await client.getPost(postId);
       this.close();
       await this.onLink({ ghostPost: post, obsidianFile, source: this.source, ghostUrl, blog });
     } catch (error) {
-      new import_obsidian6.Notice(`Failed to fetch post: ${error.message}`);
+      new import_obsidian7.Notice(`Failed to fetch post: ${error.message}`);
     }
   }
   onClose() {
@@ -2299,8 +2469,8 @@ var LinkToGhostModal = class extends import_obsidian6.Modal {
 };
 
 // src/modals/edit-properties-modal.ts
-var import_obsidian7 = require("obsidian");
-var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
+var import_obsidian8 = require("obsidian");
+var EditGhostPropertiesModal = class extends import_obsidian8.Modal {
   constructor(app, title, initial, info, availableBlogs, onSubmit) {
     super(app);
     this.submitting = false;
@@ -2318,9 +2488,9 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
     this.statusContainer = contentEl.createDiv();
     this.renderStatus();
     if (this.availableBlogs.length >= 2) {
-      new import_obsidian7.Setting(contentEl).setHeading().setName("Blogs");
+      new import_obsidian8.Setting(contentEl).setHeading().setName("Blogs");
       for (const blog of this.availableBlogs) {
-        new import_obsidian7.Setting(contentEl).setName(blog.name).addToggle((t) => t.setValue(this.form.blogIds.includes(blog.id)).onChange((v) => {
+        new import_obsidian8.Setting(contentEl).setName(blog.name).addToggle((t) => t.setValue(this.form.blogIds.includes(blog.id)).onChange((v) => {
           if (v) {
             if (!this.form.blogIds.includes(blog.id))
               this.form.blogIds.push(blog.id);
@@ -2330,19 +2500,19 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
         }));
       }
     }
-    new import_obsidian7.Setting(contentEl).setName("Status").addDropdown((d) => d.addOption("draft", "Draft").addOption("publish", "Publish now").addOption("schedule", "Schedule").setValue(this.form.status).onChange((v) => {
+    new import_obsidian8.Setting(contentEl).setName("Status").addDropdown((d) => d.addOption("draft", "Draft").addOption("publish", "Publish now").addOption("schedule", "Schedule").setValue(this.form.status).onChange((v) => {
       this.form.status = v;
       this.updateDateVisibility();
     }));
-    this.dateSetting = new import_obsidian7.Setting(contentEl).setName("Publish date").setDesc("Date used when scheduling, e.g. 2026-07-01 09:00").addText((t) => t.setPlaceholder("2026-07-01 09:00").setValue(this.form.publishedAt).onChange((v) => this.form.publishedAt = v));
-    new import_obsidian7.Setting(contentEl).setName("Visibility").addDropdown((d) => d.addOption("public", "Public").addOption("members", "Members only").addOption("paid", "Paid").setValue(this.form.visibility).onChange((v) => this.form.visibility = v));
-    new import_obsidian7.Setting(contentEl).setName("Featured").addToggle((t) => t.setValue(this.form.featured).onChange((v) => this.form.featured = v));
-    new import_obsidian7.Setting(contentEl).setName("Use first image as cover").setDesc("Promote the first body image to the feature image and remove it from the body (ignored if a feature image is set)").addToggle((t) => t.setValue(this.form.coverFromFirstImage).onChange((v) => this.form.coverFromFirstImage = v));
-    new import_obsidian7.Setting(contentEl).setName("Excerpt").addText((t) => t.setValue(this.form.excerpt).onChange((v) => this.form.excerpt = v));
-    new import_obsidian7.Setting(contentEl).setName("Tags").setDesc("Comma-separated").addText((t) => t.setValue(this.form.tags).onChange((v) => this.form.tags = v));
-    new import_obsidian7.Setting(contentEl).setName("Slug").setDesc("Leave empty to derive from the title").addText((t) => t.setValue(this.form.slug).onChange((v) => this.form.slug = v));
-    new import_obsidian7.Setting(contentEl).setName("Feature image").setDesc("URL").addText((t) => t.setValue(this.form.featureImage).onChange((v) => this.form.featureImage = v));
-    new import_obsidian7.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close())).addButton((b) => {
+    this.dateSetting = new import_obsidian8.Setting(contentEl).setName("Publish date").setDesc("Date used when scheduling, e.g. 2026-07-01 09:00").addText((t) => t.setPlaceholder("2026-07-01 09:00").setValue(this.form.publishedAt).onChange((v) => this.form.publishedAt = v));
+    new import_obsidian8.Setting(contentEl).setName("Visibility").addDropdown((d) => d.addOption("public", "Public").addOption("members", "Members only").addOption("paid", "Paid").setValue(this.form.visibility).onChange((v) => this.form.visibility = v));
+    new import_obsidian8.Setting(contentEl).setName("Featured").addToggle((t) => t.setValue(this.form.featured).onChange((v) => this.form.featured = v));
+    new import_obsidian8.Setting(contentEl).setName("Use first image as cover").setDesc("Promote the first body image to the feature image and remove it from the body (ignored if a feature image is set)").addToggle((t) => t.setValue(this.form.coverFromFirstImage).onChange((v) => this.form.coverFromFirstImage = v));
+    new import_obsidian8.Setting(contentEl).setName("Excerpt").addText((t) => t.setValue(this.form.excerpt).onChange((v) => this.form.excerpt = v));
+    new import_obsidian8.Setting(contentEl).setName("Tags").setDesc("Comma-separated").addText((t) => t.setValue(this.form.tags).onChange((v) => this.form.tags = v));
+    new import_obsidian8.Setting(contentEl).setName("Slug").setDesc("Leave empty to derive from the title").addText((t) => t.setValue(this.form.slug).onChange((v) => this.form.slug = v));
+    new import_obsidian8.Setting(contentEl).setName("Feature image").setDesc("URL").addText((t) => t.setValue(this.form.featureImage).onChange((v) => this.form.featureImage = v));
+    new import_obsidian8.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close())).addButton((b) => {
       this.saveBtn = b;
       b.setButtonText("Save").onClick(() => void this.submit(false));
     }).addButton((b) => {
@@ -2360,14 +2530,14 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
     const statusRow = c.createDiv({ cls: "omnighost-status" });
     const iconEl = statusRow.createSpan({ cls: "omnighost-status-icon" });
     if (this.info.savedStatus === "publish") {
-      (0, import_obsidian7.setIcon)(iconEl, "check-circle");
+      (0, import_obsidian8.setIcon)(iconEl, "check-circle");
       statusRow.addClass("is-published");
       statusRow.createSpan({ text: "Published" });
     } else if (this.info.savedStatus === "schedule") {
-      (0, import_obsidian7.setIcon)(iconEl, "clock");
+      (0, import_obsidian8.setIcon)(iconEl, "clock");
       statusRow.createSpan({ text: "Scheduled" });
     } else {
-      (0, import_obsidian7.setIcon)(iconEl, "circle");
+      (0, import_obsidian8.setIcon)(iconEl, "circle");
       statusRow.createSpan({ text: "Draft" });
     }
     if (this.info.publicUrl) {
@@ -2377,10 +2547,10 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
       link.setAttr("target", "_blank");
       link.setAttr("rel", "noopener");
       const copyBtn = urlRow.createEl("button", { cls: "clickable-icon omnighost-copy" });
-      (0, import_obsidian7.setIcon)(copyBtn, "copy");
+      (0, import_obsidian8.setIcon)(copyBtn, "copy");
       copyBtn.setAttr("aria-label", "Copy public URL");
       copyBtn.addEventListener("click", () => {
-        void navigator.clipboard.writeText(this.info.publicUrl).then(() => new import_obsidian7.Notice("Copied public URL"));
+        void navigator.clipboard.writeText(this.info.publicUrl).then(() => new import_obsidian8.Notice("Copied public URL"));
       });
     }
     const statuses = this.info.blogStatuses;
@@ -2388,17 +2558,17 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
       for (const bs of statuses) {
         const row = c.createDiv({ cls: "omnighost-public-url" });
         const icon = row.createSpan({ cls: "omnighost-status-icon" });
-        (0, import_obsidian7.setIcon)(icon, bs.published ? "check-circle" : "circle");
+        (0, import_obsidian8.setIcon)(icon, bs.published ? "check-circle" : "circle");
         row.createSpan({ text: ` ${bs.name}: ` });
         if (bs.url) {
           const link = row.createEl("a", { text: bs.url, href: bs.url });
           link.setAttr("target", "_blank");
           link.setAttr("rel", "noopener");
           const copyBtn = row.createEl("button", { cls: "clickable-icon omnighost-copy" });
-          (0, import_obsidian7.setIcon)(copyBtn, "copy");
+          (0, import_obsidian8.setIcon)(copyBtn, "copy");
           copyBtn.setAttr("aria-label", `Copy ${bs.name} URL`);
           copyBtn.addEventListener("click", () => {
-            void navigator.clipboard.writeText(bs.url).then(() => new import_obsidian7.Notice(`Copied ${bs.name} URL`));
+            void navigator.clipboard.writeText(bs.url).then(() => new import_obsidian8.Notice(`Copied ${bs.name} URL`));
           });
         } else {
           row.createSpan({ text: "draft (not synced yet)" });
@@ -2430,8 +2600,8 @@ var EditGhostPropertiesModal = class extends import_obsidian7.Modal {
 };
 
 // src/modals/migrate-prefix-modal.ts
-var import_obsidian8 = require("obsidian");
-var MigratePrefixModal = class extends import_obsidian8.Modal {
+var import_obsidian9 = require("obsidian");
+var MigratePrefixModal = class extends import_obsidian9.Modal {
   constructor(app, currentPrefix, onMigrate) {
     super(app);
     this.currentPrefix = currentPrefix;
@@ -2445,15 +2615,15 @@ var MigratePrefixModal = class extends import_obsidian8.Modal {
     contentEl.createEl("p", {
       text: `Rename every frontmatter key starting with "${this.currentPrefix}" to the new prefix, across all notes in the vault, and update the plugin setting. Values are preserved.`
     });
-    new import_obsidian8.Setting(contentEl).setName("New prefix").setDesc("For example, g_").addText((t) => t.setValue(this.newPrefix).onChange((v) => this.newPrefix = v));
-    new import_obsidian8.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close())).addButton((b) => b.setButtonText("Migrate").setCta().onClick(() => {
+    new import_obsidian9.Setting(contentEl).setName("New prefix").setDesc("For example, g_").addText((t) => t.setValue(this.newPrefix).onChange((v) => this.newPrefix = v));
+    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close())).addButton((b) => b.setButtonText("Migrate").setCta().onClick(() => {
       const np = this.newPrefix.trim();
       if (!np) {
-        new import_obsidian8.Notice("Enter a prefix");
+        new import_obsidian9.Notice("Enter a prefix");
         return;
       }
       if (np === this.currentPrefix) {
-        new import_obsidian8.Notice("Enter a different prefix");
+        new import_obsidian9.Notice("Enter a different prefix");
         return;
       }
       this.close();
@@ -2466,8 +2636,8 @@ var MigratePrefixModal = class extends import_obsidian8.Modal {
 };
 
 // src/modals/select-blogs-modal.ts
-var import_obsidian9 = require("obsidian");
-var SelectBlogsModal = class extends import_obsidian9.Modal {
+var import_obsidian10 = require("obsidian");
+var SelectBlogsModal = class extends import_obsidian10.Modal {
   constructor(app, blogs, preselectedIds, opts, onConfirm) {
     super(app);
     this.blogs = blogs;
@@ -2482,21 +2652,21 @@ var SelectBlogsModal = class extends import_obsidian9.Modal {
     contentEl.createEl("h3", { text: this.heading });
     if (this.blogs.length === 0) {
       contentEl.createEl("p", { text: "No blogs configured yet \u2014 add one in settings." });
-      new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close()));
+      new import_obsidian10.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close()));
       return;
     }
     for (const blog of this.blogs) {
-      new import_obsidian9.Setting(contentEl).setName(blog.name).setDesc(blog.url).addToggle((t) => t.setValue(this.selected.has(blog.id)).onChange((v) => {
+      new import_obsidian10.Setting(contentEl).setName(blog.name).setDesc(blog.url).addToggle((t) => t.setValue(this.selected.has(blog.id)).onChange((v) => {
         if (v)
           this.selected.add(blog.id);
         else
           this.selected.delete(blog.id);
       }));
     }
-    new import_obsidian9.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close())).addButton((b) => b.setButtonText(this.confirmLabel).setCta().onClick(() => {
+    new import_obsidian10.Setting(contentEl).addButton((b) => b.setButtonText("Cancel").onClick(() => this.close())).addButton((b) => b.setButtonText(this.confirmLabel).setCta().onClick(() => {
       const chosen = this.blogs.filter((b2) => this.selected.has(b2.id));
       if (chosen.length === 0) {
-        new import_obsidian9.Notice("Select at least one blog");
+        new import_obsidian10.Notice("Select at least one blog");
         return;
       }
       this.close();
@@ -2593,6 +2763,7 @@ async function parseTextpack(buf, fallbackName) {
           ghost = {
             blog: typeof o.blog === "string" ? o.blog : void 0,
             slug: typeof o.slug === "string" ? o.slug : void 0,
+            title: typeof o.title === "string" ? o.title : void 0,
             tags: Array.isArray(o.tags) ? o.tags.map((t) => String(t)) : void 0,
             excerpt: typeof o.excerpt === "string" ? o.excerpt : void 0
           };
@@ -2679,7 +2850,7 @@ var paywallDeduplicateExtension = import_view.EditorView.updateListener.of((upda
 
 // main.ts
 var DEV_MODE = false;
-var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
+var GhostWriterManagerPlugin = class extends import_obsidian11.Plugin {
   constructor() {
     super(...arguments);
     /** Uploaded image content-hash → Ghost URL. Stored in its own file, separate from settings. */
@@ -2699,10 +2870,10 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     await this.loadImageCache();
     await this.migrateLegacyImageCache();
     await this.migrateBlogs();
-    const apiKey = this.loadApiKey();
+    const defaultCredentials = this.defaultGhostClientCredentials();
     this.ghostClient = new GhostAPIClient(
-      this.settings.ghostUrl,
-      apiKey,
+      defaultCredentials.url,
+      defaultCredentials.apiKey,
       this.app
     );
     this.syncEngine = new SyncEngine(this.app, this.settings, this.ghostClient, this.imageCache, () => this.saveImageCache());
@@ -2712,7 +2883,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     };
     if (DEV_MODE) {
       console.debug("[Ghost] DEV_MODE enabled: Auto-sync on file changes (2s debounce)");
-      this.syncDebounced = (0, import_obsidian10.debounce)(
+      this.syncDebounced = (0, import_obsidian11.debounce)(
         async (file) => {
           if (this.syncEngine.shouldSyncFile(file)) {
             await this.syncFileRouted(file);
@@ -2724,7 +2895,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       );
       this.registerEvent(
         this.app.vault.on("modify", (file) => {
-          if (file instanceof import_obsidian10.TFile && this.syncDebounced) {
+          if (file instanceof import_obsidian11.TFile && this.syncDebounced) {
             this.syncDebounced(file);
           }
         })
@@ -2734,13 +2905,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.pendingDeletedFolders = [];
     this.app.workspace.onLayoutReady(() => this.rebuildGhostIndex());
     this.registerEvent(this.app.metadataCache.on("changed", (file) => this.indexFile(file)));
-    this.registerEvent(this.app.vault.on("rename", (af, oldPath) => this.reindexRenamed(af, (0, import_obsidian10.normalizePath)(oldPath))));
+    this.registerEvent(this.app.vault.on("rename", (af, oldPath) => this.reindexRenamed(af, (0, import_obsidian11.normalizePath)(oldPath))));
     this.registerEvent(
       this.app.vault.on("delete", (af) => {
         if (!this.settings.promptDeleteOnFolderDelete)
           return;
-        if (af instanceof import_obsidian10.TFolder) {
-          this.pendingDeletedFolders.push((0, import_obsidian10.normalizePath)(af.path));
+        if (af instanceof import_obsidian11.TFolder) {
+          this.pendingDeletedFolders.push((0, import_obsidian11.normalizePath)(af.path));
           this.scheduleDeleteBatch();
         }
       })
@@ -2751,7 +2922,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       this.registerEvent(this.app.vault.on("create", (af) => {
         if (!this.settings.autoImportTextpacks)
           return;
-        if (af instanceof import_obsidian10.TFile && af.extension === "textpack") {
+        if (af instanceof import_obsidian11.TFile && af.extension === "textpack") {
           window.setTimeout(() => {
             void this.importVaultTextpack(af);
           }, 800);
@@ -2771,7 +2942,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.addRibbonIcon("ghost", "Edit ghost properties", () => {
       const file = this.app.workspace.getActiveFile();
       if (!file || file.extension !== "md") {
-        new import_obsidian10.Notice("Open a note first");
+        new import_obsidian11.Notice("Open a note first");
         return;
       }
       void this.openEditPropertiesModal(file);
@@ -2812,15 +2983,21 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.addCommand({
       id: "add-ghost-properties",
       name: "Add ghost properties to current note",
-      editorCallback: (_editor, view) => {
-        void this.addGhostPropertiesToCurrentNote(view.file);
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
+          return;
+        void this.addGhostPropertiesToCurrentNote(file);
       }
     });
     this.addCommand({
       id: "sync-current-note",
       name: "Sync current note to ghost",
-      editorCallback: (_editor, view) => {
-        void this.syncCurrentNote(view.file);
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
+          return;
+        void this.syncCurrentNote(file);
       }
     });
     this.addCommand({
@@ -2840,23 +3017,21 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.addCommand({
       id: "seed-note-from-ghost-by-slug",
       name: "Seed note from existing ghost post (by slug)",
-      editorCallback: (_editor, view) => {
-        if (!view.file) {
-          new import_obsidian10.Notice("No active file");
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
           return;
-        }
-        void this.seedActiveNoteFromGhost(view.file);
+        void this.seedActiveNoteFromGhost(file);
       }
     });
     this.addCommand({
       id: "edit-ghost-properties",
       name: "Edit ghost properties (modal)",
-      editorCallback: (_editor, view) => {
-        if (!view.file) {
-          new import_obsidian10.Notice("No active file");
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
           return;
-        }
-        void this.openEditPropertiesModal(view.file);
+        void this.openEditPropertiesModal(file);
       }
     });
     this.addCommand({
@@ -2876,12 +3051,11 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.addCommand({
       id: "set-note-blogs",
       name: "Set blog(s) for this note",
-      editorCallback: (_editor, view) => {
-        if (!view.file) {
-          new import_obsidian10.Notice("No active file");
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
           return;
-        }
-        this.openSetBlogsModal(view.file);
+        this.openSetBlogsModal(file);
       }
     });
     this.addCommand({
@@ -2942,14 +3116,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     this.addCommand({
       id: "debug-ghost-properties",
       name: "Debug: show ghost properties in current note",
-      editorCallback: (_editor, view) => {
-        if (!view.file) {
-          new import_obsidian10.Notice("No active file");
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
           return;
-        }
-        const cache = this.app.metadataCache.getFileCache(view.file);
+        const cache = this.app.metadataCache.getFileCache(file);
         if (!(cache == null ? void 0 : cache.frontmatter)) {
-          new import_obsidian10.Notice("No frontmatter found");
+          new import_obsidian11.Notice("No frontmatter found");
           console.debug("[Ghost Debug] No frontmatter");
           return;
         }
@@ -2959,10 +3132,10 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
           (key) => key.startsWith(this.settings.yamlPrefix)
         );
         if (ghostKeys.length === 0) {
-          new import_obsidian10.Notice(`No properties with prefix "${this.settings.yamlPrefix}" found`);
+          new import_obsidian11.Notice(`No properties with prefix "${this.settings.yamlPrefix}" found`);
           console.debug("[Ghost Debug] Available keys:", Object.keys(cache.frontmatter));
         } else {
-          new import_obsidian10.Notice(`Found ${ghostKeys.length} Ghost properties`);
+          new import_obsidian11.Notice(`Found ${ghostKeys.length} Ghost properties`);
           console.debug("[Ghost Debug] Ghost properties:", ghostKeys);
         }
       }
@@ -2971,38 +3144,37 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       id: "debug-test-jwt",
       name: "Debug: test JWT token generation",
       callback: async () => {
-        const apiKey2 = this.loadApiKey();
-        if (!this.settings.ghostUrl || !apiKey2) {
-          new import_obsidian10.Notice("Please configure ghost URL and admin API key first");
+        const { blog, url, apiKey } = this.defaultGhostClientCredentials();
+        if (!url || !apiKey) {
+          new import_obsidian11.Notice("Please configure a blog URL and admin API key first");
           return;
         }
         try {
           console.debug("[Ghost Debug] Testing JWT generation...");
-          console.debug("[Ghost Debug] Ghost URL:", this.settings.ghostUrl);
-          console.debug("[Ghost Debug] API key format:", apiKey2.includes(":") ? "Valid (contains :)" : "Invalid (missing :)");
-          const result = await this.ghostClient.testConnection();
+          console.debug("[Ghost Debug] Ghost URL:", url);
+          console.debug("[Ghost Debug] API key format:", apiKey.includes(":") ? "Valid (contains :)" : "Invalid (missing :)");
+          const client = blog ? this.getClientForBlog(blog) : this.ghostClient;
+          const result = await client.testConnection();
           if (result) {
-            new import_obsidian10.Notice("JWT generation successful! Connection works.");
+            new import_obsidian11.Notice("JWT generation successful! Connection works.");
             console.debug("[Ghost Debug] JWT and connection working");
           } else {
-            new import_obsidian10.Notice("Connection failed - check console for details");
+            new import_obsidian11.Notice("Connection failed - check console for details");
             console.debug("[Ghost Debug] Connection failed");
           }
         } catch (error) {
           console.error("[Ghost Debug] Error:", error);
-          new import_obsidian10.Notice(`Error: ${error.message}`);
+          new import_obsidian11.Notice(`Error: ${error.message}`);
         }
       }
     });
     this.addCommand({
       id: "debug-show-file-data",
       name: "Debug: show file content and metadata",
-      editorCallback: (_editor, view) => {
-        const file = view.file;
-        if (!file) {
-          new import_obsidian10.Notice("No active file");
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
           return;
-        }
         void this.app.vault.read(file).then((content) => {
           const cache = this.app.metadataCache.getFileCache(file);
           console.debug("[Ghost Debug] ===== FILE DEBUG =====");
@@ -3011,25 +3183,31 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
           console.debug("[Ghost Debug] Frontmatter:", cache == null ? void 0 : cache.frontmatter);
           console.debug("[Ghost Debug] Content length:", content.length);
           console.debug("[Ghost Debug] ===== END DEBUG =====");
-          new import_obsidian10.Notice("File data logged to console");
+          new import_obsidian11.Notice("File data logged to console");
         }).catch((error) => {
           console.error("[Ghost Debug] Error reading file:", error);
-          new import_obsidian10.Notice(`Error reading file: ${error.message}`);
+          new import_obsidian11.Notice(`Error reading file: ${error.message}`);
         });
       }
     });
     this.addCommand({
       id: "schedule-current-note",
       name: "Schedule current note",
-      editorCheckCallback: (checking, _editor, ctx) => {
-        if (ctx.file) {
-          if (!checking)
-            void this.scheduleCurrentNote(ctx.file);
-          return true;
-        }
-        return false;
+      callback: () => {
+        const file = this.activeMarkdownFile();
+        if (!file)
+          return;
+        void this.scheduleCurrentNote(file);
       }
     });
+  }
+  activeMarkdownFile() {
+    const file = this.app.workspace.getActiveFile();
+    if (!file || file.extension !== "md") {
+      new import_obsidian11.Notice("Open a note first");
+      return null;
+    }
+    return file;
   }
   async activateCalendarView() {
     const existing = this.app.workspace.getLeavesOfType(CALENDAR_VIEW_TYPE);
@@ -3075,7 +3253,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
   }
   /** Auto-sync only the notes inside one blog's folder. */
   async syncBlogFolder(blog) {
-    const folder = (0, import_obsidian10.normalizePath)(blog.folder);
+    const folder = (0, import_obsidian11.normalizePath)(blog.folder);
     const files = this.app.vault.getMarkdownFiles().filter((f) => !this.isArchivePath(f.path) && (f.path === folder || f.path.startsWith(folder + "/")));
     for (const f of files) {
       try {
@@ -3114,7 +3292,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
   /** Path of the image-cache file, kept in the plugin dir, separate from data.json. */
   imageCachePath() {
     var _a;
-    return (0, import_obsidian10.normalizePath)(`${(_a = this.manifest.dir) != null ? _a : "."}/image-cache.json`);
+    return (0, import_obsidian11.normalizePath)(`${(_a = this.manifest.dir) != null ? _a : "."}/image-cache.json`);
   }
   async loadImageCache() {
     const path = this.imageCachePath();
@@ -3160,73 +3338,73 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     try {
       if (!this.app.secretStorage) {
         console.error("[Ghost] app.secretStorage is not available. Obsidian version may be too old.");
-        new import_obsidian10.Notice("Obsidian secrets API not available. Please update Obsidian to the latest version.");
+        new import_obsidian11.Notice("Obsidian secrets API not available. Please update Obsidian to the latest version.");
         return "";
       }
       const apiKey = this.app.secretStorage.getSecret(this.settings.ghostApiKeySecretName);
       if (!apiKey) {
         console.error("[Ghost] Secret not found or empty:", this.settings.ghostApiKeySecretName);
-        new import_obsidian10.Notice(`Secret "${this.settings.ghostApiKeySecretName}" not found in Keychain. Please create it in settings \u2192 Keychain.`);
+        new import_obsidian11.Notice(`Secret "${this.settings.ghostApiKeySecretName}" not found in Keychain. Please create it in settings \u2192 Keychain.`);
         return "";
       }
       (_a = this.ghostClient) == null ? void 0 : _a.updateCredentials(this.settings.ghostUrl, apiKey);
       return apiKey;
     } catch (error) {
       console.error("[Ghost] Error loading API key from secrets:", error);
-      new import_obsidian10.Notice(`Error loading secret: ${error.message}`);
+      new import_obsidian11.Notice(`Error loading secret: ${error.message}`);
       return "";
     }
   }
   async testGhostConnection() {
-    const apiKey = this.loadApiKey();
-    if (!this.settings.ghostUrl || !apiKey) {
-      new import_obsidian10.Notice("Please configure ghost URL and admin API key first");
+    const { blog, url, apiKey } = this.defaultGhostClientCredentials();
+    if (!url || !apiKey) {
+      new import_obsidian11.Notice("Please configure a blog URL and admin API key first");
       return;
     }
     try {
-      const title = await this.ghostClient.testConnection();
+      const client = blog ? this.getClientForBlog(blog) : this.ghostClient;
+      const title = await client.testConnection();
       if (title) {
-        new import_obsidian10.Notice(`Successfully connected to ${title}`);
+        new import_obsidian11.Notice(`Successfully connected to ${title}`);
       } else {
-        new import_obsidian10.Notice("Failed to connect to ghost. Please check your credentials.");
+        new import_obsidian11.Notice("Failed to connect to ghost. Please check your credentials.");
       }
     } catch (error) {
       console.error("Ghost connection test failed:", error);
-      new import_obsidian10.Notice(`Connection failed: ${error.message}`);
+      new import_obsidian11.Notice(`Connection failed: ${error.message}`);
     }
   }
   async syncWithGhost() {
-    const apiKey = this.loadApiKey();
-    if (!this.settings.ghostUrl || !apiKey) {
-      new import_obsidian10.Notice("Please configure ghost URL and admin API key first");
+    if (!this.hasAnyConfiguredBlogCredentials()) {
+      new import_obsidian11.Notice("Please configure a blog URL and admin API key first");
       return;
     }
     try {
       await this.syncAllRouted();
     } catch (error) {
       console.error("Sync failed:", error);
-      new import_obsidian10.Notice(`Sync failed: ${error.message}`);
+      new import_obsidian11.Notice(`Sync failed: ${error.message}`);
     }
   }
   async createNewGhostPost() {
     var _a;
     try {
-      const syncFolderPath = (0, import_obsidian10.normalizePath)(((_a = this.defaultBlog()) == null ? void 0 : _a.folder) || this.settings.syncFolder);
+      const syncFolderPath = (0, import_obsidian11.normalizePath)(((_a = this.defaultBlog()) == null ? void 0 : _a.folder) || this.settings.syncFolder);
       const syncFolder = this.app.vault.getAbstractFileByPath(syncFolderPath);
       if (!syncFolder) {
         await this.app.vault.createFolder(syncFolderPath);
       }
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
       const fileName = `ghost-post-${timestamp}.md`;
-      const filePath = (0, import_obsidian10.normalizePath)(`${syncFolderPath}/${fileName}`);
+      const filePath = (0, import_obsidian11.normalizePath)(`${syncFolderPath}/${fileName}`);
       const content = generateNewPostTemplate(this.settings);
       const file = await this.app.vault.create(filePath, content);
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
-      new import_obsidian10.Notice("New ghost post created!");
+      new import_obsidian11.Notice("New ghost post created!");
     } catch (error) {
       console.error("Error creating new Ghost post:", error);
-      new import_obsidian10.Notice(`Failed to create new post: ${error.message}`);
+      new import_obsidian11.Notice(`Failed to create new post: ${error.message}`);
     }
   }
   /**
@@ -3237,7 +3415,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     const hasBlogKey = this.settings.blogs.some((b) => this.loadApiKeyForSecret(b.apiKeySecretName).trim());
     const hasGlobal = !!(this.settings.ghostUrl && this.loadApiKeyForSecret(this.settings.ghostApiKeySecretName).trim());
     if (!hasBlogKey && !hasGlobal) {
-      new import_obsidian10.Notice("Configure a blog (URL + admin API key) in settings first");
+      new import_obsidian11.Notice("Configure a blog (URL + admin API key) in settings first");
       return;
     }
     new ImportFromGhostModal(
@@ -3259,7 +3437,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
     var _a, _b, _c, _d, _e, _f;
     try {
       const prefix = this.settings.yamlPrefix;
-      const folderPath = (0, import_obsidian10.normalizePath)(blog ? blog.folder : this.settings.syncFolder);
+      const folderPath = (0, import_obsidian11.normalizePath)(blog ? blog.folder : this.settings.syncFolder);
       if (!this.app.vault.getAbstractFileByPath(folderPath)) {
         await this.app.vault.createFolder(folderPath);
       }
@@ -3285,10 +3463,10 @@ var GhostWriterManagerPlugin = class extends import_obsidian10.Plugin {
       }
       const title = post.title || "Untitled Post";
       const safeFileName = title.replace(/[\\/:*?"<>|]/g, "-").trim();
-      const filePath = (0, import_obsidian10.normalizePath)(`${folderPath}/${safeFileName}.md`);
+      const filePath = (0, import_obsidian11.normalizePath)(`${folderPath}/${safeFileName}.md`);
       const bodyMarkdown = htmlToMarkdown((_f = post.html) != null ? _f : "");
       const content = `---
-${(0, import_obsidian10.stringifyYaml)(fm)}---
+${(0, import_obsidian11.stringifyYaml)(fm)}---
 
 # ${title}
 
@@ -3296,15 +3474,15 @@ ${bodyMarkdown}`;
       let finalPath = filePath;
       if (this.app.vault.getAbstractFileByPath(filePath)) {
         const ts = Date.now();
-        finalPath = (0, import_obsidian10.normalizePath)(`${folderPath}/${safeFileName}-${ts}.md`);
+        finalPath = (0, import_obsidian11.normalizePath)(`${folderPath}/${safeFileName}-${ts}.md`);
       }
       const file = await this.app.vault.create(finalPath, content);
       const leaf = this.app.workspace.getLeaf(false);
       await leaf.openFile(file);
-      new import_obsidian10.Notice(`Imported: "${title}"${blog ? ` (${blog.name})` : ""}`);
+      new import_obsidian11.Notice(`Imported: "${title}"${blog ? ` (${blog.name})` : ""}`);
     } catch (error) {
       console.error("[Ghost Import] Error importing post:", error);
-      new import_obsidian10.Notice(`Failed to import post: ${error.message}`);
+      new import_obsidian11.Notice(`Failed to import post: ${error.message}`);
     }
   }
   /**
@@ -3318,24 +3496,24 @@ ${bodyMarkdown}`;
     const fmObj = (_a = cache == null ? void 0 : cache.frontmatter) != null ? _a : {};
     const metadata = (cache == null ? void 0 : cache.frontmatter) ? parseGhostMetadata(cache.frontmatter, prefix) : null;
     if (!(metadata == null ? void 0 : metadata.slug)) {
-      new import_obsidian10.Notice(`Set ${prefix}slug on this note first to seed from Ghost`);
+      new import_obsidian11.Notice(`Set ${prefix}slug on this note first to seed from Ghost`);
       return;
     }
     const blog = this.resolveBlogsForFile(file)[0];
     if (!blog || !this.loadApiKeyForSecret(blog.apiKeySecretName).trim()) {
-      new import_obsidian10.Notice("This note's blog has no API key \u2014 set it in settings.");
+      new import_obsidian11.Notice("This note's blog has no API key \u2014 set it in settings.");
       return;
     }
     if (this.readBlogId(fmObj, blog)) {
-      new import_obsidian10.Notice(`This note is already linked to a post on ${blog.name}; nothing to seed.`);
+      new import_obsidian11.Notice(`This note is already linked to a post on ${blog.name}; nothing to seed.`);
       return;
     }
     this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, false, void 0, blog.name);
     try {
-      new import_obsidian10.Notice(`Looking up "${metadata.slug}" on ${blog.name}\u2026`);
+      new import_obsidian11.Notice(`Looking up "${metadata.slug}" on ${blog.name}\u2026`);
       await this.syncEngine.seedNoteFromGhostBySlug(file, metadata.slug);
     } catch (error) {
-      new import_obsidian10.Notice(`Seed failed: ${error.message}`);
+      new import_obsidian11.Notice(`Seed failed: ${error.message}`);
     } finally {
       this.restoreDefaultBlogContext();
     }
@@ -3349,33 +3527,25 @@ ${bodyMarkdown}`;
     return "blog-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   }
   deriveBlogName(url) {
-    try {
-      return new URL(url).hostname.replace(/^www\./, "");
-    } catch (e) {
-      return "";
-    }
+    return ghostHostname(url);
   }
   /** Lowercased hostname of a URL, or '' if unparseable. */
   hostOf(url) {
-    try {
-      return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
-    } catch (e) {
-      return "";
-    }
+    return ghostHostname(url);
   }
   /** Root folder all blog folders nest under (the legacy sync folder, default "Ghost Posts"). */
   ghostPostsRoot() {
-    return (0, import_obsidian10.normalizePath)((this.settings.syncFolder || "Ghost Posts").trim() || "Ghost Posts");
+    return (0, import_obsidian11.normalizePath)((this.settings.syncFolder || "Ghost Posts").trim() || "Ghost Posts");
   }
   /** Derived folder for a blog: "<root>/<domain>", or the root itself if the URL has no host. */
   defaultFolderFor(blog) {
     const host = this.hostOf(blog.url);
     const root = this.ghostPostsRoot();
-    return host ? (0, import_obsidian10.normalizePath)(`${root}/${host}`) : root;
+    return host ? (0, import_obsidian11.normalizePath)(`${root}/${host}`) : root;
   }
   /** True if any markdown file lives in this folder (or below). */
   folderHasNotes(folder) {
-    const f = (0, import_obsidian10.normalizePath)(folder || "");
+    const f = (0, import_obsidian11.normalizePath)(folder || "");
     if (!f || f === "/")
       return false;
     return this.app.vault.getMarkdownFiles().some((x) => x.path === f || x.path.startsWith(f + "/"));
@@ -3463,6 +3633,26 @@ ${bodyMarkdown}`;
       console.error("[Ghost] Error loading secret", secretName, e);
       return "";
     }
+  }
+  defaultGhostClientCredentials() {
+    const blog = this.defaultBlog();
+    if (blog) {
+      return {
+        blog,
+        url: blog.url,
+        apiKey: this.loadApiKeyForSecret(blog.apiKeySecretName)
+      };
+    }
+    return {
+      blog: null,
+      url: this.settings.ghostUrl,
+      apiKey: this.loadApiKey()
+    };
+  }
+  hasAnyConfiguredBlogCredentials() {
+    return this.settings.blogs.some(
+      (blog) => !!blog.url.trim() && !!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()
+    );
   }
   /** Migrate the legacy single-blog config into blogs[] on first run. */
   async migrateBlogs() {
@@ -3557,7 +3747,7 @@ ${bodyMarkdown}`;
     let best = null;
     let bestLen = -1;
     for (const b of this.settings.blogs) {
-      const f = (0, import_obsidian10.normalizePath)(b.folder);
+      const f = (0, import_obsidian11.normalizePath)(b.folder);
       if (f && (path === f || path.startsWith(f + "/")) && f.length > bestLen) {
         best = b;
         bestLen = f.length;
@@ -3574,7 +3764,7 @@ ${bodyMarkdown}`;
     if (explicit.length > 0)
       return explicit;
     const inferred = this.blogForPath(file.path);
-    if (inferred && (0, import_obsidian10.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
+    if (inferred && (0, import_obsidian11.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
       return [inferred];
     const def = this.defaultBlog();
     return def ? [def] : [];
@@ -3616,7 +3806,7 @@ ${bodyMarkdown}`;
         return withId;
     }
     const inferred = this.blogForPath(file.path);
-    if (inferred && (0, import_obsidian10.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
+    if (inferred && (0, import_obsidian11.normalizePath)(inferred.folder) !== this.ghostPostsRoot())
       return inferred;
     return this.defaultBlog();
   }
@@ -3631,7 +3821,7 @@ ${bodyMarkdown}`;
     for (const blog of this.settings.blogs) {
       if (!this.hostOf(blog.url))
         continue;
-      const from = (0, import_obsidian10.normalizePath)(blog.folder);
+      const from = (0, import_obsidian11.normalizePath)(blog.folder);
       const to = this.defaultFolderFor(blog);
       plans.push({ blog, from, to });
       fromCounts.set(from, ((_a = fromCounts.get(from)) != null ? _a : 0) + 1);
@@ -3654,11 +3844,11 @@ ${bodyMarkdown}`;
           if (path !== from && !path.startsWith(from + "/"))
             continue;
           const file = this.app.vault.getAbstractFileByPath(path);
-          if (!(file instanceof import_obsidian10.TFile))
+          if (!(file instanceof import_obsidian11.TFile))
             continue;
           const rel = path.startsWith(from + "/") ? path.slice(from.length + 1) : file.name;
           try {
-            if (await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${to}/${rel}`)))
+            if (await this.moveNoteTo(file, (0, import_obsidian11.normalizePath)(`${to}/${rel}`)))
               moved++;
           } catch (e) {
             console.error("[Ghost] organize move failed:", path, e);
@@ -3669,7 +3859,7 @@ ${bodyMarkdown}`;
           const archPrefix = `${from}/${this.archiveName()}/`;
           for (const f of this.app.vault.getMarkdownFiles().filter((x) => x.path.startsWith(archPrefix))) {
             try {
-              if (await this.moveNoteTo(f, (0, import_obsidian10.normalizePath)(`${to}/${this.archiveName()}/${f.path.slice(archPrefix.length)}`)))
+              if (await this.moveNoteTo(f, (0, import_obsidian11.normalizePath)(`${to}/${this.archiveName()}/${f.path.slice(archPrefix.length)}`)))
                 moved++;
             } catch (e) {
               console.error("[Ghost] organize archive move failed:", f.path, e);
@@ -3726,7 +3916,7 @@ ${bodyMarkdown}`;
   async syncFileToBlogs(file, blogs) {
     var _a, _b;
     if (blogs.length === 0) {
-      new import_obsidian10.Notice("No ghost blog configured \u2014 add one in settings.");
+      new import_obsidian11.Notice("No ghost blog configured \u2014 add one in settings.");
       return false;
     }
     const prefix = this.settings.yamlPrefix;
@@ -3735,10 +3925,13 @@ ${bodyMarkdown}`;
     const split0 = splitFrontmatter(content0);
     if (split0) {
       try {
-        const d = (0, import_obsidian10.parseYaml)(split0.raw);
+        const d = (0, import_obsidian11.parseYaml)(split0.raw);
         if (d && typeof d === "object")
           fmObj = d;
       } catch (e) {
+        console.debug("[Ghost Sync] Cannot sync note with invalid frontmatter:", file.path, e);
+        new import_obsidian11.Notice(`Cannot sync "${file.basename}": frontmatter YAML is invalid. Fix the red properties and try again.`);
+        return false;
       }
     }
     const fmStr = (k) => typeof fmObj[k] === "string" ? String(fmObj[k]) : "";
@@ -3752,7 +3945,7 @@ ${bodyMarkdown}`;
       const keys = this.blogKeys(blog);
       const knownId = this.readBlogId(fmObj, blog) || void 0;
       if (!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()) {
-        new import_obsidian10.Notice(`Blog "${blog.name}" has no API key \u2014 set it in settings.`);
+        new import_obsidian11.Notice(`Blog "${blog.name}" has no API key \u2014 set it in settings.`);
         ok = false;
         continue;
       }
@@ -3760,18 +3953,22 @@ ${bodyMarkdown}`;
       try {
         ok = await this.syncEngine.syncFileToGhost(file) && ok;
       } catch (e) {
-        new import_obsidian10.Notice(`Sync to ${blog.name} failed: ${e.message}`);
+        new import_obsidian11.Notice(`Sync to ${blog.name} failed: ${e.message}`);
         ok = false;
       }
       const post = this.syncEngine.lastSyncedPost;
       if (post) {
-        const editorUrl = `${blog.url.replace(/\/$/, "")}/ghost/#/editor/post/${post.id}`;
+        const editorUrl = buildGhostEditorUrl(blog.url, post.id);
+        const isPublic = post.status === "published" || post.status === "scheduled";
         if (fmStr(keys.id) !== post.id)
           updates[keys.id] = post.id;
         if (fmStr(keys.url) !== editorUrl)
           updates[keys.url] = editorUrl;
-        if (post.url && fmStr(keys.pub) !== post.url)
+        if (isPublic && post.url && fmStr(keys.pub) !== post.url) {
           updates[keys.pub] = post.url;
+        } else if (!isPublic && keys.pub in fmObj) {
+          staleKeys.push(keys.pub);
+        }
         if (!wroteSlug && post.slug) {
           updates[`${prefix}slug`] = post.slug;
           wroteSlug = true;
@@ -3820,14 +4017,14 @@ ${bodyMarkdown}`;
   async syncAllRouted() {
     const files = /* @__PURE__ */ new Set();
     for (const blog of this.settings.blogs) {
-      const folder = (0, import_obsidian10.normalizePath)(blog.folder);
+      const folder = (0, import_obsidian11.normalizePath)(blog.folder);
       this.app.vault.getMarkdownFiles().filter((f) => !this.isArchivePath(f.path) && (f.path === folder || f.path.startsWith(folder + "/"))).forEach((f) => files.add(f));
     }
     if (files.size === 0) {
-      new import_obsidian10.Notice("No notes to sync (check your blog folders).");
+      new import_obsidian11.Notice("No notes to sync (check your blog folders).");
       return;
     }
-    new import_obsidian10.Notice(`Syncing ${files.size} note(s)\u2026`);
+    new import_obsidian11.Notice(`Syncing ${files.size} note(s)\u2026`);
     let success = 0;
     let failed = 0;
     for (const f of files) {
@@ -3836,7 +4033,7 @@ ${bodyMarkdown}`;
       else
         failed++;
     }
-    new import_obsidian10.Notice(`Sync complete: ${success} ok${failed ? `, ${failed} failed` : ""}`);
+    new import_obsidian11.Notice(`Sync complete: ${success} ok${failed ? `, ${failed} failed` : ""}`);
   }
   /** Picker to set which blog(s) the active note publishes to. */
   openSetBlogsModal(file) {
@@ -3852,23 +4049,27 @@ ${bodyMarkdown}`;
         await this.app.vault.process(file, (content) => upsertFrontmatterKeys(content, { [`${prefix}blog`]: yaml }));
         this.settings.defaultBlogId = chosen[chosen.length - 1].id;
         await this.saveSettings();
-        new import_obsidian10.Notice(`Note will publish to: ${chosen.map((b) => b.name).join(", ")}`);
+        new import_obsidian11.Notice(`Note will publish to: ${chosen.map((b) => b.name).join(", ")}`);
       }
     ).open();
   }
   /** Import a parsed .textpack as a new note in `blog`'s folder: write its
    *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
    *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
-  async importTextpack(pack, blog) {
+  async importTextpack(pack, blog, titleOptions) {
     const prefix = this.settings.yamlPrefix;
     const slug = (pack.ghost.slug || pack.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "post";
-    const folder = (0, import_obsidian10.normalizePath)(blog.folder || this.settings.syncFolder);
-    const heading = pack.markdown.match(/^#\s+(.+)$/m);
-    const title = (heading ? heading[1] : pack.name).trim();
+    const folder = (0, import_obsidian11.normalizePath)(blog.folder || this.settings.syncFolder);
+    const titleAnalysis = analyzeTextpackTitle(pack);
+    const normalizedTitle = normalizeTextpackTitle(pack, titleOptions != null ? titleOptions : {
+      primarySource: titleAnalysis.defaultSource,
+      updateSecondary: true
+    });
+    const title = normalizedTitle.title;
     const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, "").trim() || slug;
-    let markdown = pack.markdown;
+    let markdown = normalizedTitle.markdown;
     if (pack.assets.size > 0) {
-      const assetDir = (0, import_obsidian10.normalizePath)(`${folder}/assets/${slug}`);
+      const assetDir = (0, import_obsidian11.normalizePath)(`${folder}/assets/${slug}`);
       if (!this.app.vault.getAbstractFileByPath(assetDir)) {
         try {
           await this.app.vault.createFolder(assetDir);
@@ -3876,10 +4077,10 @@ ${bodyMarkdown}`;
         }
       }
       for (const [base, data] of pack.assets) {
-        const path = (0, import_obsidian10.normalizePath)(`${assetDir}/${base}`);
+        const path = (0, import_obsidian11.normalizePath)(`${assetDir}/${base}`);
         const buf = data.slice().buffer;
         const existing = this.app.vault.getAbstractFileByPath(path);
-        if (existing instanceof import_obsidian10.TFile)
+        if (existing instanceof import_obsidian11.TFile)
           await this.app.vault.modifyBinary(existing, buf);
         else
           await this.app.vault.createBinary(path, buf);
@@ -3887,16 +4088,15 @@ ${bodyMarkdown}`;
       markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${slug}/`);
     }
     let content = addGhostPropertiesToContent(markdown, this.settings);
-    const esc = (s) => s.replace(/\n/g, " ").replace(/"/g, '\\"');
     const upserts = {
       [`${prefix}blog`]: this.blogPropertyYaml([blog]),
       [`${prefix}slug`]: slug
     };
     if (pack.ghost.tags && pack.ghost.tags.length > 0) {
-      upserts[`${prefix}tags`] = `[${pack.ghost.tags.map((t) => `"${esc(t)}"`).join(", ")}]`;
+      upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
     }
     if (pack.ghost.excerpt)
-      upserts[`${prefix}excerpt`] = `"${esc(pack.ghost.excerpt)}"`;
+      upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
     content = upsertFrontmatterKeys(content, upserts);
     if (!this.app.vault.getAbstractFileByPath(folder)) {
       try {
@@ -3904,14 +4104,14 @@ ${bodyMarkdown}`;
       } catch (e) {
       }
     }
-    let notePath = (0, import_obsidian10.normalizePath)(`${folder}/${fileName}.md`);
+    let notePath = (0, import_obsidian11.normalizePath)(`${folder}/${fileName}.md`);
     if (this.app.vault.getAbstractFileByPath(notePath)) {
-      notePath = (0, import_obsidian10.normalizePath)(`${folder}/${fileName}-${Date.now()}.md`);
+      notePath = (0, import_obsidian11.normalizePath)(`${folder}/${fileName}-${Date.now()}.md`);
     }
     const file = await this.app.vault.create(notePath, content);
     await this.app.workspace.getLeaf(false).openFile(file);
     const imgs = pack.assets.size;
-    new import_obsidian10.Notice(`Imported "${title}" \u2192 ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? "" : "s"})` : ""}`);
+    new import_obsidian11.Notice(`Imported "${title}" \u2192 ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? "" : "s"})` : ""}`);
   }
   /** Import one .textpack file that lives inside the vault, then trash the pack.
    *  Target blog: the pack's own metadata, else the blog whose folder holds the
@@ -3926,7 +4126,7 @@ ${bodyMarkdown}`;
       const hinted = pack.ghost.blog ? this.settings.blogs.find((b) => this.blogMatchesToken(b, pack.ghost.blog)) : null;
       const blog = (_a = hinted != null ? hinted : this.blogForPath(file.path)) != null ? _a : this.defaultBlog();
       if (!blog) {
-        new import_obsidian10.Notice(`Found ${file.name} but no blog is configured \u2014 add one in settings.`);
+        new import_obsidian11.Notice(`Found ${file.name} but no blog is configured \u2014 add one in settings.`);
         return false;
       }
       await this.importTextpack(pack, blog);
@@ -3934,7 +4134,7 @@ ${bodyMarkdown}`;
       return true;
     } catch (e) {
       console.error("[Ghost] textpack import failed:", file.path, e);
-      new import_obsidian10.Notice(`Textpack import failed for ${file.name}: ${e.message}`);
+      new import_obsidian11.Notice(`Textpack import failed for ${file.name}: ${e.message}`);
       return false;
     }
   }
@@ -3943,7 +4143,7 @@ ${bodyMarkdown}`;
     const packs = this.app.vault.getFiles().filter((f) => f.extension === "textpack");
     if (packs.length === 0) {
       if (notifyWhenNone)
-        new import_obsidian10.Notice("No .textpack files found in the vault.");
+        new import_obsidian11.Notice("No .textpack files found in the vault.");
       return;
     }
     for (const p of packs)
@@ -3967,26 +4167,26 @@ ${bodyMarkdown}`;
   async importAllFromBlog(blog) {
     const apiKey = this.loadApiKeyForSecret(blog.apiKeySecretName);
     if (!blog.url || !apiKey) {
-      new import_obsidian10.Notice(`Blog "${blog.name}" is missing its URL or API key.`);
+      new import_obsidian11.Notice(`Blog "${blog.name}" is missing its URL or API key.`);
       return;
     }
     const client = this.getClientForBlog(blog);
     try {
-      new import_obsidian10.Notice(`Importing all posts from ${blog.name}\u2026`);
+      new import_obsidian11.Notice(`Importing all posts from ${blog.name}\u2026`);
       const posts = await client.getPosts(void 0, "all", "published_at desc");
-      const folder = (0, import_obsidian10.normalizePath)(blog.folder);
+      const folder = (0, import_obsidian11.normalizePath)(blog.folder);
       if (!this.app.vault.getAbstractFileByPath(folder)) {
         await this.app.vault.createFolder(folder);
       }
       let count = 0;
       for (const post of posts) {
-        const editorUrl = `${blog.url.replace(/\/$/, "")}/ghost/#/editor/post/${post.id}`;
+        const editorUrl = buildGhostEditorUrl(blog.url, post.id);
         await this.writePostAsNoteInFolder(post, editorUrl, folder, blog);
         count++;
       }
-      new import_obsidian10.Notice(`Imported ${count} post${count === 1 ? "" : "s"} from ${blog.name} into ${folder}`);
+      new import_obsidian11.Notice(`Imported ${count} post${count === 1 ? "" : "s"} from ${blog.name} into ${folder}`);
     } catch (e) {
-      new import_obsidian10.Notice(`Import from ${blog.name} failed: ${e.message}`);
+      new import_obsidian11.Notice(`Import from ${blog.name} failed: ${e.message}`);
     }
   }
   /** Write one Ghost post as a note in a folder, tagged with its blog (per-blog keys). */
@@ -4016,14 +4216,14 @@ ${bodyMarkdown}`;
     const safe = title.replace(/[\\/:*?"<>|]/g, "-").trim() || "Untitled Post";
     const body = htmlToMarkdown((_f = post.html) != null ? _f : "");
     const content = `---
-${(0, import_obsidian10.stringifyYaml)(fm)}---
+${(0, import_obsidian11.stringifyYaml)(fm)}---
 
 # ${title}
 
 ${body}`;
-    let path = (0, import_obsidian10.normalizePath)(`${folder}/${safe}.md`);
+    let path = (0, import_obsidian11.normalizePath)(`${folder}/${safe}.md`);
     if (this.app.vault.getAbstractFileByPath(path)) {
-      path = (0, import_obsidian10.normalizePath)(`${folder}/${safe}-${post.id}.md`);
+      path = (0, import_obsidian11.normalizePath)(`${folder}/${safe}-${post.id}.md`);
     }
     if (this.app.vault.getAbstractFileByPath(path))
       return;
@@ -4033,7 +4233,7 @@ ${body}`;
     const n = Object.keys(this.imageCache).length;
     this.imageCache = {};
     await this.saveImageCache();
-    new import_obsidian10.Notice(`Cleared ghost image cache (${n} ${n === 1 ? "entry" : "entries"})`);
+    new import_obsidian11.Notice(`Cleared ghost image cache (${n} ${n === 1 ? "entry" : "entries"})`);
   }
   /**
    * Rename all notes' Ghost frontmatter keys from the current prefix to a new
@@ -4043,7 +4243,7 @@ ${body}`;
     const oldPrefix = this.settings.yamlPrefix;
     if (!newPrefix || newPrefix === oldPrefix)
       return;
-    new import_obsidian10.Notice("Migrating ghost property prefix\u2026");
+    new import_obsidian11.Notice("Migrating ghost property prefix\u2026");
     const files = this.app.vault.getMarkdownFiles();
     let count = 0;
     for (const file of files) {
@@ -4059,7 +4259,7 @@ ${body}`;
     }
     this.settings.yamlPrefix = newPrefix;
     await this.saveSettings();
-    new import_obsidian10.Notice(`Migrated ${count} note${count === 1 ? "" : "s"} from "${oldPrefix}" to "${newPrefix}"`);
+    new import_obsidian11.Notice(`Migrated ${count} note${count === 1 ? "" : "s"} from "${oldPrefix}" to "${newPrefix}"`);
   }
   /**
    * Open the "Edit Ghost properties" modal for the active note. Reads current
@@ -4074,7 +4274,7 @@ ${body}`;
     const split = splitFrontmatter(content);
     if (split) {
       try {
-        const d = (0, import_obsidian10.parseYaml)(split.raw);
+        const d = (0, import_obsidian11.parseYaml)(split.raw);
         if (d && typeof d === "object")
           fmObj = d;
       } catch (e) {
@@ -4100,17 +4300,16 @@ ${body}`;
     new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
       var _a2, _b2, _c2;
       const tags = form.tags.split(",").map((t) => t.trim()).filter(Boolean);
-      const tagsYaml = tags.length > 0 ? `[${tags.map((t) => `"${t}"`).join(", ")}]` : "[]";
-      const escq = (s) => s.replace(/\n/g, " ").replace(/"/g, '\\"');
+      const tagsYaml = yamlStringArray(tags, true);
       const ghostFields = {
         post_access: form.visibility,
         published: form.status === "draft" ? "false" : "true",
-        published_at: form.status === "schedule" && form.publishedAt ? `"${form.publishedAt}"` : '""',
+        published_at: yamlString(form.status === "schedule" && form.publishedAt ? form.publishedAt : "", true),
         featured: form.featured ? "true" : "false",
         cover_from_first_image: form.coverFromFirstImage ? "true" : "false",
-        excerpt: `"${escq(form.excerpt)}"`,
-        feature_image: `"${form.featureImage}"`,
-        slug: form.slug,
+        excerpt: yamlString(form.excerpt, true),
+        feature_image: yamlString(form.featureImage, true),
+        slug: yamlString(form.slug, true),
         tags: tagsYaml
       };
       const selectedBlogs = form.blogIds.map((id) => this.settings.blogs.find((b) => b.id === id)).filter((b) => !!b);
@@ -4122,12 +4321,15 @@ ${body}`;
         this.settings.defaultBlogId = selectedBlogs[selectedBlogs.length - 1].id;
         await this.saveSettings();
       }
-      new import_obsidian10.Notice("Ghost properties saved");
+      new import_obsidian11.Notice("Ghost properties saved");
       if (doSync) {
         try {
-          await this.syncFileToBlogs(file, selectedBlogs.length ? selectedBlogs : this.resolveBlogsForFile(file));
+          const synced = await this.syncFileToBlogs(file, selectedBlogs.length ? selectedBlogs : this.resolveBlogsForFile(file));
+          if (!synced) {
+            new import_obsidian11.Notice("Ghost properties saved, but sync did not complete. Check the note properties and blog settings.");
+          }
         } catch (e) {
-          new import_obsidian10.Notice(`Sync failed: ${e.message}`);
+          new import_obsidian11.Notice(`Sync failed: ${e.message}`);
         }
       }
       const freshContent = await this.app.vault.read(file);
@@ -4135,7 +4337,7 @@ ${body}`;
       const freshSplit = splitFrontmatter(freshContent);
       if (freshSplit) {
         try {
-          const d = (0, import_obsidian10.parseYaml)(freshSplit.raw);
+          const d = (0, import_obsidian11.parseYaml)(freshSplit.raw);
           if (d && typeof d === "object")
             freshFm = d;
         } catch (e) {
@@ -4154,7 +4356,7 @@ ${body}`;
     const hasBlogKey = this.settings.blogs.some((b) => this.loadApiKeyForSecret(b.apiKeySecretName).trim());
     const hasGlobal = !!(this.settings.ghostUrl && this.loadApiKeyForSecret(this.settings.ghostApiKeySecretName).trim());
     if (!hasBlogKey && !hasGlobal) {
-      new import_obsidian10.Notice("Configure a blog (URL + admin API key) in settings first");
+      new import_obsidian11.Notice("Configure a blog (URL + admin API key) in settings first");
       return;
     }
     new LinkToGhostModal(
@@ -4181,17 +4383,17 @@ ${body}`;
       if (source === "ghost") {
         const s = blog ? this.blogKeyFor(blog) : "";
         const tags = ((_a = post.tags) != null ? _a : []).map((t) => t.name);
-        const tagsYaml = tags.length > 0 ? `[${tags.map((t) => `"${t}"`).join(", ")}]` : "[]";
+        const tagsYaml = yamlStringArray(tags, true);
         const ghostFields = {
           post_access: (_b = post.visibility) != null ? _b : "public",
           published: post.status === "published" || post.status === "scheduled" ? "true" : "false",
-          published_at: `"${(_c = post.published_at) != null ? _c : ""}"`,
+          published_at: yamlString((_c = post.published_at) != null ? _c : "", true),
           featured: post.featured ? "true" : "false",
           tags: tagsYaml,
-          excerpt: `"${((_d = post.excerpt) != null ? _d : "").replace(/[\r\n]+/g, " ").replace(/"/g, '\\"')}"`,
-          feature_image: `"${(_e = post.feature_image) != null ? _e : ""}"`,
+          excerpt: yamlString((_d = post.excerpt) != null ? _d : "", true),
+          feature_image: yamlString((_e = post.feature_image) != null ? _e : "", true),
           no_sync: "false",
-          slug: post.slug
+          slug: yamlString(post.slug, true)
         };
         if (blog) {
           ghostFields[`id_${s}`] = post.id;
@@ -4213,7 +4415,7 @@ ${bodyMarkdown}`) : `# ${title}
 ${bodyMarkdown}`;
         });
         await this.ensureInFolder(file, targetFolder);
-        new import_obsidian10.Notice(`Linked and updated note from Ghost: "${title}"${blog ? ` (${blog.name})` : ""}`);
+        new import_obsidian11.Notice(`Linked and updated note from Ghost: "${title}"${blog ? ` (${blog.name})` : ""}`);
       } else {
         const upserts = { [`${prefix}slug`]: post.slug };
         if (blog) {
@@ -4225,17 +4427,17 @@ ${bodyMarkdown}`;
         await this.app.vault.process(file, (raw) => upsertFrontmatterKeys(addGhostPropertiesToContent(raw, this.settings), upserts));
         const movedFile = await this.ensureInFolder(file, targetFolder);
         await this.syncFileRouted(movedFile != null ? movedFile : file);
-        new import_obsidian10.Notice(`Linked and synced note to Ghost: "${file.basename}"${blog ? ` (${blog.name})` : ""}`);
+        new import_obsidian11.Notice(`Linked and synced note to Ghost: "${file.basename}"${blog ? ` (${blog.name})` : ""}`);
       }
     } catch (error) {
       console.error("[Ghost Link] Error linking note:", error);
-      new import_obsidian10.Notice(`Failed to link note: ${error.message}`);
+      new import_obsidian11.Notice(`Failed to link note: ${error.message}`);
     }
   }
   /** Move a file into `folderPath` if it isn't already there. Returns the moved TFile, or null if unchanged. */
   async ensureInFolder(file, folderPath) {
     var _a, _b;
-    const dest = (0, import_obsidian10.normalizePath)(folderPath);
+    const dest = (0, import_obsidian11.normalizePath)(folderPath);
     const currentFolder = (_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : "";
     if (currentFolder === dest) {
       return null;
@@ -4243,19 +4445,18 @@ ${bodyMarkdown}`;
     if (!this.app.vault.getAbstractFileByPath(dest)) {
       await this.app.vault.createFolder(dest);
     }
-    const newPath = (0, import_obsidian10.normalizePath)(`${dest}/${file.name}`);
+    const newPath = (0, import_obsidian11.normalizePath)(`${dest}/${file.name}`);
     await this.app.fileManager.renameFile(file, newPath);
     return this.app.vault.getFileByPath(newPath);
   }
   async syncCurrentNote(file) {
     var _a, _b;
     if (!file) {
-      new import_obsidian10.Notice("No active file");
+      new import_obsidian11.Notice("No active file");
       return;
     }
-    const apiKey = this.loadApiKey();
-    if (!this.settings.ghostUrl || !apiKey) {
-      new import_obsidian10.Notice("Please configure ghost URL and admin API key first");
+    if (!this.hasAnyConfiguredBlogCredentials()) {
+      new import_obsidian11.Notice("Please configure a blog URL and admin API key first");
       return;
     }
     let cache = this.app.metadataCache.getFileCache(file);
@@ -4264,68 +4465,68 @@ ${bodyMarkdown}`;
     );
     if (!hasGhostProps) {
       await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
-      new import_obsidian10.Notice("Ghost properties added. Syncing\u2026");
+      new import_obsidian11.Notice("Ghost properties added. Syncing\u2026");
       await new Promise((resolve) => activeWindow.setTimeout(resolve, 300));
       cache = this.app.metadataCache.getFileCache(file);
     }
     const noSyncKey = `${this.settings.yamlPrefix}no_sync`;
     if (((_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a[noSyncKey]) === true || ((_b = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _b[noSyncKey]) === "true") {
-      new import_obsidian10.Notice("Sync is disabled for this note (no_sync: true).");
+      new import_obsidian11.Notice("Sync is disabled for this note (no_sync: true).");
       return;
     }
     let targetFile = file;
     if (!this.fileInAnyBlogFolder(file)) {
       const blog = this.resolveBlogsForFile(file)[0];
-      const folder = (0, import_obsidian10.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
-      new import_obsidian10.Notice(`Moving note to ${folder}`);
-      const newPath = await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${folder}/${file.name}`));
+      const folder = (0, import_obsidian11.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
+      new import_obsidian11.Notice(`Moving note to ${folder}`);
+      const newPath = await this.moveNoteTo(file, (0, import_obsidian11.normalizePath)(`${folder}/${file.name}`));
       const movedFile = newPath ? this.app.vault.getFileByPath(newPath) : null;
       if (!movedFile) {
-        new import_obsidian10.Notice("Failed to move file to the blog folder.");
+        new import_obsidian11.Notice("Failed to move file to the blog folder.");
         return;
       }
       targetFile = movedFile;
     }
-    new import_obsidian10.Notice(`Syncing "${targetFile.basename}"\u2026`);
+    new import_obsidian11.Notice(`Syncing "${targetFile.basename}"\u2026`);
     const success = await this.syncFileRouted(targetFile, true);
     if (!success) {
-      new import_obsidian10.Notice(`Sync failed for "${targetFile.basename}". Check the console for details.`);
+      new import_obsidian11.Notice(`Sync failed for "${targetFile.basename}". Check the console for details.`);
     }
   }
   async addGhostPropertiesToCurrentNote(file) {
     if (!file) {
-      new import_obsidian10.Notice("No active file");
+      new import_obsidian11.Notice("No active file");
       return;
     }
     try {
       const before = await this.app.vault.cachedRead(file);
       if (addGhostPropertiesToContent(before, this.settings) === before) {
-        new import_obsidian10.Notice("This note already has all ghost properties");
+        new import_obsidian11.Notice("This note already has all ghost properties");
         return;
       }
       await this.app.vault.process(file, (content) => addGhostPropertiesToContent(content, this.settings));
-      new import_obsidian10.Notice("Ghost properties added! This note will now sync with ghost.");
+      new import_obsidian11.Notice("Ghost properties added! This note will now sync with ghost.");
       if (!this.fileInAnyBlogFolder(file)) {
         const blog = this.resolveBlogsForFile(file)[0];
-        const folder = (0, import_obsidian10.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
-        const newPath = await this.moveNoteTo(file, (0, import_obsidian10.normalizePath)(`${folder}/${file.name}`));
+        const folder = (0, import_obsidian11.normalizePath)((blog ? blog.folder : "") || this.settings.syncFolder);
+        const newPath = await this.moveNoteTo(file, (0, import_obsidian11.normalizePath)(`${folder}/${file.name}`));
         if (newPath)
-          new import_obsidian10.Notice(`File moved to ${folder}`);
+          new import_obsidian11.Notice(`File moved to ${folder}`);
       }
     } catch (error) {
       console.error("Error adding Ghost properties:", error);
-      new import_obsidian10.Notice(`Failed to add Ghost properties: ${error.message}`);
+      new import_obsidian11.Notice(`Failed to add Ghost properties: ${error.message}`);
     }
   }
   async scheduleCurrentNote(file) {
     var _a;
     if (!file) {
-      new import_obsidian10.Notice("No active file");
+      new import_obsidian11.Notice("No active file");
       return;
     }
     const blog = this.resolveBlogsForFile(file)[0];
     if (!blog || !this.loadApiKeyForSecret(blog.apiKeySecretName).trim()) {
-      new import_obsidian10.Notice("This note's blog has no API key \u2014 set it in settings.");
+      new import_obsidian11.Notice("This note's blog has no API key \u2014 set it in settings.");
       return;
     }
     let lastPost;
@@ -4337,7 +4538,7 @@ ${bodyMarkdown}`;
       );
       lastPost = posts[0];
     } catch (error) {
-      new import_obsidian10.Notice(`Failed to fetch posts from ${blog.name}: ${error.message}`);
+      new import_obsidian11.Notice(`Failed to fetch posts from ${blog.name}: ${error.message}`);
       return;
     }
     const base = (lastPost == null ? void 0 : lastPost.published_at) ? new Date(lastPost.published_at) : /* @__PURE__ */ new Date();
@@ -4353,7 +4554,7 @@ ${bodyMarkdown}`;
         [`${this.settings.yamlPrefix}published_at`]: newIso,
         [`${this.settings.yamlPrefix}published`]: "true"
       }));
-      new import_obsidian10.Notice(`Scheduled for ${newDateLabel}`);
+      new import_obsidian11.Notice(`Scheduled for ${newDateLabel}`);
     };
     if (existingDate) {
       const existingLabel = new Date(existingDate).toLocaleString();
@@ -4371,15 +4572,15 @@ ${bodyMarkdown}`;
   /** True if a path is inside any blog's archive subfolder. */
   isArchivePath(path) {
     const name = this.archiveName();
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian11.normalizePath)(b.folder));
+    folders.push((0, import_obsidian11.normalizePath)(this.settings.syncFolder));
     return folders.some((f) => f && path.startsWith(`${f}/${name}/`));
   }
   /** Where a deleted note is archived: <its blog folder>/<archiveName>/<relative path>. */
   archiveTargetFor(notePath) {
     const name = this.archiveName();
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian11.normalizePath)(b.folder));
+    folders.push((0, import_obsidian11.normalizePath)(this.settings.syncFolder));
     let base = "";
     for (const f of folders) {
       if (f && (notePath === f || notePath.startsWith(f + "/")) && f.length > base.length)
@@ -4388,7 +4589,7 @@ ${bodyMarkdown}`;
     if (!base)
       base = notePath.split("/").slice(0, -1).join("/");
     const rel = notePath.startsWith(base + "/") ? notePath.slice(base.length + 1) : notePath.split("/").pop();
-    return (0, import_obsidian10.normalizePath)(`${base}/${name}/${rel}`);
+    return (0, import_obsidian11.normalizePath)(`${base}/${name}/${rel}`);
   }
   /** Move a note into its blog's archive subfolder (instead of trashing it),
    *  preserving its frontmatter and adding an archive record. */
@@ -4398,7 +4599,7 @@ ${bodyMarkdown}`;
     if (!dest)
       return;
     const moved = this.app.vault.getAbstractFileByPath(dest);
-    if (moved instanceof import_obsidian10.TFile) {
+    if (moved instanceof import_obsidian11.TFile) {
       try {
         const prefix = this.settings.yamlPrefix;
         await this.app.vault.process(moved, (content) => upsertFrontmatterKeys(content, {
@@ -4416,8 +4617,8 @@ ${bodyMarkdown}`;
   fileInAnyBlogFolder(file) {
     if (this.isArchivePath(file.path))
       return false;
-    const folders = this.settings.blogs.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
-    folders.push((0, import_obsidian10.normalizePath)(this.settings.syncFolder));
+    const folders = this.settings.blogs.map((b) => (0, import_obsidian11.normalizePath)(b.folder));
+    folders.push((0, import_obsidian11.normalizePath)(this.settings.syncFolder));
     return folders.some((f) => f && (file.path === f || file.path.startsWith(f + "/")));
   }
   // ─── Ghost index + bulk delete ───────────────────────────────────────────
@@ -4453,7 +4654,7 @@ ${bodyMarkdown}`;
   indexFile(file) {
     if (!this.ghostIndex)
       this.ghostIndex = /* @__PURE__ */ new Map();
-    if (!(file instanceof import_obsidian10.TFile) || file.extension !== "md")
+    if (!(file instanceof import_obsidian11.TFile) || file.extension !== "md")
       return;
     if (!this.fileInAnyBlogFolder(file)) {
       this.ghostIndex.delete(file.path);
@@ -4477,20 +4678,20 @@ ${bodyMarkdown}`;
   reindexRenamed(af, oldPath) {
     if (!this.ghostIndex)
       return;
-    if (af instanceof import_obsidian10.TFolder) {
+    if (af instanceof import_obsidian11.TFolder) {
       const prefix = oldPath + "/";
       for (const [path, entries2] of [...this.ghostIndex]) {
         if (!path.startsWith(prefix))
           continue;
         this.ghostIndex.delete(path);
-        const np = (0, import_obsidian10.normalizePath)(`${af.path}/${path.slice(prefix.length)}`);
+        const np = (0, import_obsidian11.normalizePath)(`${af.path}/${path.slice(prefix.length)}`);
         this.ghostIndex.set(np, entries2.map((e) => ({ ...e, path: np })));
       }
       return;
     }
     const entries = this.ghostIndex.get(oldPath);
     this.ghostIndex.delete(oldPath);
-    if (af instanceof import_obsidian10.TFile && af.extension === "md" && this.fileInAnyBlogFolder(af)) {
+    if (af instanceof import_obsidian11.TFile && af.extension === "md" && this.fileInAnyBlogFolder(af)) {
       const items = this.bulkItemsForFile(af);
       if (items.length > 0) {
         this.ghostIndex.set(af.path, items);
@@ -4518,7 +4719,7 @@ ${bodyMarkdown}`;
     for (const [path, entries] of this.ghostIndex) {
       if (inDeleted(path))
         continue;
-      if (!(this.app.vault.getAbstractFileByPath(path) instanceof import_obsidian10.TFile))
+      if (!(this.app.vault.getAbstractFileByPath(path) instanceof import_obsidian11.TFile))
         continue;
       for (const e of entries)
         live.add(`${e.blogId}:${e.ghostId}`);
@@ -4576,7 +4777,7 @@ ${bodyMarkdown}`;
       }
       if (deleteLocal && it.path) {
         const f = this.app.vault.getAbstractFileByPath(it.path);
-        if (f instanceof import_obsidian10.TFile) {
+        if (f instanceof import_obsidian11.TFile) {
           try {
             if (this.settings.archiveDeletedNotes)
               await this.archiveNote(f);
@@ -4590,12 +4791,12 @@ ${bodyMarkdown}`;
       if (it.path && this.ghostIndex)
         this.ghostIndex.delete(it.path);
     }
-    new import_obsidian10.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}`);
+    new import_obsidian11.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}`);
   }
   /** On-demand bulk delete: pick blog(s), list their linked posts (all checked). */
   openBulkDeleteCommand() {
     if (this.settings.blogs.length === 0) {
-      new import_obsidian10.Notice("No blogs configured.");
+      new import_obsidian11.Notice("No blogs configured.");
       return;
     }
     const def = this.defaultBlog();
@@ -4606,7 +4807,7 @@ ${bodyMarkdown}`;
       { heading: "Bulk delete \u2014 choose blog(s)", confirmLabel: "Next" },
       (chosen) => {
         const chosenIds = new Set(chosen.map((b) => b.id));
-        const folders = chosen.map((b) => (0, import_obsidian10.normalizePath)(b.folder));
+        const folders = chosen.map((b) => (0, import_obsidian11.normalizePath)(b.folder));
         const items = [];
         for (const f of this.app.vault.getMarkdownFiles()) {
           if (this.isArchivePath(f.path))
@@ -4619,7 +4820,7 @@ ${bodyMarkdown}`;
           }
         }
         if (items.length === 0) {
-          new import_obsidian10.Notice("No linked ghost posts found in the selected folder(s).");
+          new import_obsidian11.Notice("No linked ghost posts found in the selected folder(s).");
           return;
         }
         new BulkDeleteModal(this.app, this, {
@@ -4659,7 +4860,7 @@ ${bodyMarkdown}`;
           else if (decision === "keep")
             await this.keepOrphanInBoth(file, job.blog);
         } catch (e) {
-          new import_obsidian10.Notice(`Failed: ${e.message}`);
+          new import_obsidian11.Notice(`Failed: ${e.message}`);
         }
         this.promptOrphanedPosts(file, orphans.slice(1));
       })();
@@ -4670,7 +4871,7 @@ ${bodyMarkdown}`;
     await this.deleteOneRemote(blog.id, ghostId);
     const { keys } = this.storedKeysForBlog(file, blog);
     await this.app.vault.process(file, (content) => removeFrontmatterKeys(content, keys));
-    new import_obsidian10.Notice(`Deleted orphaned post on ${blog.name}`);
+    new import_obsidian11.Notice(`Deleted orphaned post on ${blog.name}`);
   }
   /** Re-add an orphaned blog to g_blog and sync it now, so the note publishes to both. */
   async keepOrphanInBoth(file, blog) {
@@ -4678,7 +4879,7 @@ ${bodyMarkdown}`;
     const all = named.some((b) => b.id === blog.id) ? named : [...named, blog];
     await this.ensureBlogProperty(file, all);
     await this.syncFileToBlogs(file, all);
-    new import_obsidian10.Notice(`Kept "${blog.name}" \u2014 this note now publishes to both`);
+    new import_obsidian11.Notice(`Kept "${blog.name}" \u2014 this note now publishes to both`);
   }
   /** Write g_blog so it lists exactly `blogs` (used when keeping an orphan in both). */
   async ensureBlogProperty(file, blogs) {
@@ -4703,7 +4904,7 @@ ${bodyMarkdown}`;
           continue;
         let fmObj;
         try {
-          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
+          fmObj = (0, import_obsidian11.parseYaml)(split.raw) || {};
         } catch (e) {
           continue;
         }
@@ -4767,7 +4968,7 @@ ${bodyMarkdown}`;
         console.error("[Ghost] normalize failed for", file.path, e);
       }
     }
-    new import_obsidian10.Notice(`Normalized blog references in ${changed} note${changed === 1 ? "" : "s"}`);
+    new import_obsidian11.Notice(`Normalized blog references in ${changed} note${changed === 1 ? "" : "s"}`);
   }
   /** A blog was renamed from `oldName`. Rewrite existing notes so their references follow it. */
   async migrateBlogRename(oldName, blog) {
@@ -4788,7 +4989,7 @@ ${bodyMarkdown}`;
           continue;
         let fmObj;
         try {
-          fmObj = (0, import_obsidian10.parseYaml)(split.raw) || {};
+          fmObj = (0, import_obsidian11.parseYaml)(split.raw) || {};
         } catch (e) {
           continue;
         }
@@ -4844,10 +5045,10 @@ ${bodyMarkdown}`;
       }
     }
     if (changed)
-      new import_obsidian10.Notice(`Updated ${changed} note${changed === 1 ? "" : "s"} for renamed blog "${blog.name}"`);
+      new import_obsidian11.Notice(`Updated ${changed} note${changed === 1 ? "" : "s"} for renamed blog "${blog.name}"`);
   }
 };
-var ConfirmScheduleModal = class extends import_obsidian10.Modal {
+var ConfirmScheduleModal = class extends import_obsidian11.Modal {
   constructor(app, currentDate, newDate, onConfirm) {
     super(app);
     this.currentDate = currentDate;
@@ -4864,17 +5065,17 @@ var ConfirmScheduleModal = class extends import_obsidian10.Modal {
       text: `Replace with: ${this.newDate}`
     });
     const buttonRow = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(buttonRow).setButtonText("Overwrite").setCta().onClick(() => {
+    new import_obsidian11.ButtonComponent(buttonRow).setButtonText("Overwrite").setCta().onClick(() => {
       this.onConfirm();
       this.close();
     });
-    new import_obsidian10.ButtonComponent(buttonRow).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian11.ButtonComponent(buttonRow).setButtonText("Cancel").onClick(() => this.close());
   }
   onClose() {
     this.contentEl.empty();
   }
 };
-var DeleteConfirmModal = class extends import_obsidian10.Modal {
+var DeleteConfirmModal = class extends import_obsidian11.Modal {
   constructor(app, postTitle, blogName, resolve) {
     super(app);
     this.postTitle = postTitle;
@@ -4893,9 +5094,9 @@ var DeleteConfirmModal = class extends import_obsidian10.Modal {
     p2.createEl("strong", { text: this.blogName });
     contentEl.createEl("p", { text: "This permanently deletes the post on ghost and cannot be undone." });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(row).setButtonText("Delete").setWarning().onClick(() => this.finish("delete"));
-    new import_obsidian10.ButtonComponent(row).setButtonText("Skip").onClick(() => this.finish("skip"));
-    new import_obsidian10.ButtonComponent(row).setButtonText("Stop \u2014 cancel all remaining").onClick(() => this.finish("stop"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Delete").setWarning().onClick(() => this.finish("delete"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Skip").onClick(() => this.finish("skip"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Stop \u2014 cancel all remaining").onClick(() => this.finish("stop"));
   }
   finish(decision) {
     this.decided = true;
@@ -4908,7 +5109,7 @@ var DeleteConfirmModal = class extends import_obsidian10.Modal {
       this.resolve("stop");
   }
 };
-var SimpleConfirmModal = class extends import_obsidian10.Modal {
+var SimpleConfirmModal = class extends import_obsidian11.Modal {
   constructor(app, title, body, confirmLabel, onResult) {
     super(app);
     this.title = title;
@@ -4922,8 +5123,8 @@ var SimpleConfirmModal = class extends import_obsidian10.Modal {
     contentEl.createEl("h3", { text: this.title });
     contentEl.createEl("p", { text: this.body });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(row).setButtonText(this.confirmLabel).setWarning().onClick(() => this.finish(true));
-    new import_obsidian10.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.finish(false));
+    new import_obsidian11.ButtonComponent(row).setButtonText(this.confirmLabel).setWarning().onClick(() => this.finish(true));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.finish(false));
   }
   finish(v) {
     this.decided = true;
@@ -4936,12 +5137,16 @@ var SimpleConfirmModal = class extends import_obsidian10.Modal {
       this.onResult(false);
   }
 };
-var ImportTextpackModal = class extends import_obsidian10.Modal {
+var ImportTextpackModal = class extends import_obsidian11.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
     this.parsed = null;
     this.blogSelect = null;
+    this.titleSource = "heading";
+    this.updateSecondaryTitle = true;
+    this.titleSelect = null;
+    this.titleDesc = null;
   }
   onOpen() {
     const { contentEl } = this;
@@ -4962,6 +5167,13 @@ var ImportTextpackModal = class extends import_obsidian10.Modal {
         try {
           this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
           const hint = this.parsed.ghost.blog;
+          const titleAnalysis = analyzeTextpackTitle(this.parsed);
+          this.titleSource = titleAnalysis.defaultSource;
+          if (this.titleSelect)
+            this.titleSelect.value = this.titleSource;
+          if (this.titleDesc) {
+            this.titleDesc.setText(this.describeImportTitles(titleAnalysis));
+          }
           status.setText(`"${this.parsed.name}" \u2014 ${this.parsed.assets.size} image(s)${hint ? `, blog: ${hint}` : ""}`);
           const hinted = hint ? this.plugin.settings.blogs.find((b) => this.plugin.blogMatchesToken(b, hint)) : null;
           if (hinted && this.blogSelect)
@@ -4972,7 +5184,7 @@ var ImportTextpackModal = class extends import_obsidian10.Modal {
         }
       })();
     });
-    new import_obsidian10.Setting(contentEl).setName("Import into blog").addDropdown((d) => {
+    new import_obsidian11.Setting(contentEl).setName("Import into blog").addDropdown((d) => {
       for (const b of this.plugin.settings.blogs)
         d.addOption(b.id, b.name || b.url || "unnamed blog");
       const def = this.plugin.defaultBlog();
@@ -4980,12 +5192,27 @@ var ImportTextpackModal = class extends import_obsidian10.Modal {
         d.setValue(def.id);
       this.blogSelect = d.selectEl;
     });
+    new import_obsidian11.Setting(contentEl).setName("Primary title on import").setDesc("Choose which source becomes the publishing title. Imported notes collapse a leading heading when it duplicates the chosen title.").addDropdown((d) => {
+      d.addOption("heading", "First heading");
+      d.addOption("metadata", "Metadata title");
+      d.setValue(this.titleSource);
+      d.onChange((value) => {
+        this.titleSource = value;
+      });
+      this.titleSelect = d.selectEl;
+    });
+    new import_obsidian11.Setting(contentEl).setName("Update secondary title").setDesc("When the chosen source differs, rewrite the other title slot to match before collapsing duplicate headings.").addToggle((t) => t.setValue(this.updateSecondaryTitle).onChange((value) => {
+      this.updateSecondaryTitle = value;
+    }));
+    this.titleDesc = contentEl.createEl("p", {
+      text: "Choose a textpack to inspect its metadata title and first heading."
+    });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(row).setButtonText("Import").setCta().onClick(() => {
+    new import_obsidian11.ButtonComponent(row).setButtonText("Import").setCta().onClick(() => {
       void (async () => {
         var _a;
         if (!this.parsed) {
-          new import_obsidian10.Notice("Choose a .textpack file first");
+          new import_obsidian11.Notice("Choose a .textpack file first");
           return;
         }
         const blog = (_a = this.plugin.settings.blogs.find((b) => {
@@ -4993,24 +5220,33 @@ var ImportTextpackModal = class extends import_obsidian10.Modal {
           return b.id === ((_a2 = this.blogSelect) == null ? void 0 : _a2.value);
         })) != null ? _a : this.plugin.defaultBlog();
         if (!blog) {
-          new import_obsidian10.Notice("No blog configured \u2014 add one in settings.");
+          new import_obsidian11.Notice("No blog configured \u2014 add one in settings.");
           return;
         }
         this.close();
         try {
-          await this.plugin.importTextpack(this.parsed, blog);
+          await this.plugin.importTextpack(this.parsed, blog, {
+            primarySource: this.titleSource,
+            updateSecondary: this.updateSecondaryTitle
+          });
         } catch (e) {
-          new import_obsidian10.Notice(`Import failed: ${e.message}`);
+          new import_obsidian11.Notice(`Import failed: ${e.message}`);
         }
       })();
     });
-    new import_obsidian10.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian11.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
   }
   onClose() {
     this.contentEl.empty();
   }
+  describeImportTitles(analysis) {
+    const metadata = analysis.metadataTitle ? `"${analysis.metadataTitle}"` : "none";
+    const heading = analysis.headingTitle ? `"${analysis.headingTitle}"` : "none";
+    const conflict = analysis.hasConflict ? " Conflict found." : "";
+    return `Metadata title: ${metadata}. First H1: ${heading}.${conflict}`;
+  }
 };
-var OrphanPostModal = class extends import_obsidian10.Modal {
+var OrphanPostModal = class extends import_obsidian11.Modal {
   constructor(app, blogName, url, onResult) {
     super(app);
     this.blogName = blogName;
@@ -5034,9 +5270,9 @@ var OrphanPostModal = class extends import_obsidian10.Modal {
     }
     contentEl.createEl("p", { text: "Delete it on ghost, or keep it \u2014 keeping re-adds the blog to g_blog and the note will publish to both again." });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(row).setButtonText("Delete on ghost").setWarning().onClick(() => this.finish("delete"));
-    new import_obsidian10.ButtonComponent(row).setButtonText("Keep in both").onClick(() => this.finish("keep"));
-    new import_obsidian10.ButtonComponent(row).setButtonText("Decide later").onClick(() => this.finish("later"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Delete on ghost").setWarning().onClick(() => this.finish("delete"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Keep in both").onClick(() => this.finish("keep"));
+    new import_obsidian11.ButtonComponent(row).setButtonText("Decide later").onClick(() => this.finish("later"));
   }
   finish(decision) {
     this.decided = true;
@@ -5049,7 +5285,7 @@ var OrphanPostModal = class extends import_obsidian10.Modal {
       this.onResult("later");
   }
 };
-var BulkDeleteModal = class extends import_obsidian10.Modal {
+var BulkDeleteModal = class extends import_obsidian11.Modal {
   constructor(app, plugin, opts) {
     super(app);
     this.plugin = plugin;
@@ -5092,13 +5328,13 @@ var BulkDeleteModal = class extends import_obsidian10.Modal {
       row2.createEl("br");
     });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
-    new import_obsidian10.ButtonComponent(row).setButtonText("Delete selected").setWarning().onClick(() => this.submit());
-    new import_obsidian10.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
+    new import_obsidian11.ButtonComponent(row).setButtonText("Delete selected").setWarning().onClick(() => this.submit());
+    new import_obsidian11.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
   }
   submit() {
     const items = this.opts.items.filter((_, i) => this.checked[i]);
     if (items.length === 0) {
-      new import_obsidian10.Notice("Nothing selected.");
+      new import_obsidian11.Notice("Nothing selected.");
       return;
     }
     const localPart = this.opts.deleteLocal ? ` and ${items.length} local note${items.length === 1 ? "" : "s"}` : "";
@@ -5119,7 +5355,7 @@ var BulkDeleteModal = class extends import_obsidian10.Modal {
     this.contentEl.empty();
   }
 };
-var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
+var GhostWriterSettingTab = class extends import_obsidian11.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
@@ -5127,7 +5363,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
   /** Render the multi-blog manager: one editable block per blog, plus "Add blog". */
   renderBlogsSettings(containerEl) {
     const plugin = this.plugin;
-    new import_obsidian10.Setting(containerEl).setHeading().setName("Ghost blogs");
+    new import_obsidian11.Setting(containerEl).setHeading().setName("Ghost blogs");
     containerEl.createEl("p", {
       cls: "setting-item-description",
       text: "Each blog has its own address, key, and folder. A note publishes to the blog(s) named in its g_blog property; the last blog you pick becomes the default for new notes."
@@ -5136,7 +5372,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     const colliding = plugin.collidingSecretBlogs();
     if (colliding.length >= 2) {
       warnEl = containerEl.createEl("p", { cls: "setting-item-description omnighost-warning" });
-      (0, import_obsidian10.setIcon)(warnEl.createSpan({ cls: "omnighost-status-icon" }), "alert-triangle");
+      (0, import_obsidian11.setIcon)(warnEl.createSpan({ cls: "omnighost-status-icon" }), "alert-triangle");
       warnEl.createSpan({ text: ` These blogs share one keychain secret (${colliding.map((b) => b.name || "untitled").join(", ")}), so they use the same admin key \u2014 the wrong one will fail with a 401. Set each blog's own key below.` });
     }
     const refreshWarn = () => {
@@ -5147,7 +5383,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     };
     plugin.settings.blogs.forEach((blog) => {
       const isDefault = blog.id === plugin.settings.defaultBlogId;
-      new import_obsidian10.Setting(containerEl).setHeading().setName(`${blog.name || "Untitled blog"}${isDefault ? "  \u2605 default" : ""}`).addExtraButton((b) => b.setIcon("star").setTooltip("Set as default").onClick(async () => {
+      new import_obsidian11.Setting(containerEl).setHeading().setName(`${blog.name || "Untitled blog"}${isDefault ? "  \u2605 default" : ""}`).addExtraButton((b) => b.setIcon("star").setTooltip("Set as default").onClick(async () => {
         plugin.settings.defaultBlogId = blog.id;
         await plugin.saveSettings();
         this.display();
@@ -5160,7 +5396,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         await plugin.saveSettings();
         this.display();
       }));
-      new import_obsidian10.Setting(containerEl).setName("Name").addText((t) => {
+      new import_obsidian11.Setting(containerEl).setName("Name").addText((t) => {
         let originalName = blog.name;
         t.setValue(blog.name).onChange(async (v) => {
           blog.name = v.trim();
@@ -5182,7 +5418,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         });
       });
       let folderInput = null;
-      new import_obsidian10.Setting(containerEl).setName("Site address").addText((t) => {
+      new import_obsidian11.Setting(containerEl).setName("Site address").addText((t) => {
         let originalUrl = blog.url;
         t.setPlaceholder("https://yourblog.com").setValue(blog.url).onChange(async (v) => {
           blog.url = v.trim();
@@ -5191,9 +5427,21 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         t.inputEl.addEventListener("blur", () => {
           void (async () => {
             const prevHost = plugin.hostOf(originalUrl);
+            const normalizedUrl = normalizeGhostSiteUrl(blog.url);
+            let normalizedChanged = false;
+            if (normalizedUrl && normalizedUrl !== blog.url) {
+              blog.url = normalizedUrl;
+              t.setValue(normalizedUrl);
+              normalizedChanged = true;
+            }
             const newHost = plugin.hostOf(blog.url);
-            if (newHost === prevHost)
+            if (newHost === prevHost) {
+              if (normalizedChanged) {
+                originalUrl = blog.url;
+                await plugin.saveSettings();
+              }
               return;
+            }
             originalUrl = blog.url;
             if (prevHost) {
               blog.aliases = blog.aliases || [];
@@ -5202,11 +5450,11 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
             }
             if (blog.folderAuto !== false) {
               const derived = plugin.defaultFolderFor(blog);
-              const cur = (0, import_obsidian10.normalizePath)(blog.folder || "");
+              const cur = (0, import_obsidian11.normalizePath)(blog.folder || "");
               if (cur === plugin.ghostPostsRoot() || !plugin.folderHasNotes(cur)) {
                 blog.folder = derived;
               } else {
-                new import_obsidian10.Notice(`"${blog.name}": folder kept at ${cur} \u2014 run "Organize folders by domain" to move its notes to ${derived}`);
+                new import_obsidian11.Notice(`"${blog.name}": folder kept at ${cur} \u2014 run "Organize folders by domain" to move its notes to ${derived}`);
               }
               if (folderInput)
                 folderInput.placeholder = plugin.defaultFolderFor(blog);
@@ -5219,7 +5467,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
       let pendingKey = "";
       let keyInput = null;
       let secretNameInput = null;
-      const keySetting = new import_obsidian10.Setting(containerEl).setName("Admin API key");
+      const keySetting = new import_obsidian11.Setting(containerEl).setName("Admin API key");
       const setKeyDesc = (stored) => keySetting.setDesc(stored ? "\u2713 Key stored for this blog. Enter a new one to replace it." : "Paste this blog's admin key (id:secret) and save.");
       setKeyDesc(hasKey);
       keySetting.addText((t) => {
@@ -5231,7 +5479,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         });
       }).addButton((b) => b.setButtonText("Save key").onClick(async () => {
         if (!pendingKey) {
-          new import_obsidian10.Notice("Enter a key first");
+          new import_obsidian11.Notice("Enter a key first");
           return;
         }
         const prevName = blog.apiKeySecretName;
@@ -5253,29 +5501,29 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           b.setDisabled(false);
           if (title) {
             keySetting.setDesc(`\u2713 Connected to ${title}. Enter a new key to replace it.`);
-            new import_obsidian10.Notice(`${blog.name || "Blog"}: connected to ${title} \u2713`);
+            new import_obsidian11.Notice(`${blog.name || "Blog"}: connected to ${title} \u2713`);
           } else {
             keySetting.setDesc("\u26A0 Key saved but the connection failed \u2014 check the key and site address.");
-            new import_obsidian10.Notice(`${blog.name || "Blog"}: key saved but connection failed`);
+            new import_obsidian11.Notice(`${blog.name || "Blog"}: key saved but connection failed`);
           }
         } catch (e) {
           b.setDisabled(false);
-          new import_obsidian10.Notice(`Could not save key: ${e.message}`);
+          new import_obsidian11.Notice(`Could not save key: ${e.message}`);
         }
       }));
-      new import_obsidian10.Setting(containerEl).setName("Key secret name").setDesc("Keychain secret holding this key (managed automatically; one per blog)").addText((t) => {
+      new import_obsidian11.Setting(containerEl).setName("Key secret name").setDesc("Keychain secret holding this key (managed automatically; one per blog)").addText((t) => {
         secretNameInput = t.inputEl;
         t.setPlaceholder("secret name").setValue(blog.apiKeySecretName).onChange(async (v) => {
           blog.apiKeySecretName = v.trim();
           await plugin.saveSettings();
         });
       });
-      new import_obsidian10.Setting(containerEl).setName("Folder").setDesc("Vault folder for this blog's posts. Leave blank to derive it from the site address (root/domain).").addText((t) => {
+      new import_obsidian11.Setting(containerEl).setName("Folder").setDesc("Vault folder for this blog's posts. Leave blank to derive it from the site address (root/domain).").addText((t) => {
         folderInput = t.inputEl;
         t.setPlaceholder(plugin.defaultFolderFor(blog)).setValue(blog.folderAuto !== false ? "" : blog.folder).onChange(async (v) => {
           const val = v.trim();
           if (val) {
-            blog.folder = (0, import_obsidian10.normalizePath)(val);
+            blog.folder = (0, import_obsidian11.normalizePath)(val);
             blog.folderAuto = false;
           } else {
             blog.folderAuto = true;
@@ -5285,11 +5533,11 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
           await plugin.saveSettings();
         });
       });
-      new import_obsidian10.Setting(containerEl).setName("Auto-sync this folder").setDesc("When off, this folder is never auto-synced (manual sync still works).").addToggle((t) => t.setValue(blog.syncEnabled !== false).onChange(async (v) => {
+      new import_obsidian11.Setting(containerEl).setName("Auto-sync this folder").setDesc("When off, this folder is never auto-synced (manual sync still works).").addToggle((t) => t.setValue(blog.syncEnabled !== false).onChange(async (v) => {
         blog.syncEnabled = v;
         await plugin.saveSettings();
       }));
-      new import_obsidian10.Setting(containerEl).setName("Sync interval (minutes)").setDesc("How often to auto-sync this folder. 0 = off. Leave blank to use the global interval.").addText((t) => t.setPlaceholder(`global (${plugin.settings.syncInterval})`).setValue(blog.syncIntervalMinutes == null ? "" : String(blog.syncIntervalMinutes)).onChange(async (v) => {
+      new import_obsidian11.Setting(containerEl).setName("Sync interval (minutes)").setDesc("How often to auto-sync this folder. 0 = off. Leave blank to use the global interval.").addText((t) => t.setPlaceholder(`global (${plugin.settings.syncInterval})`).setValue(blog.syncIntervalMinutes == null ? "" : String(blog.syncIntervalMinutes)).onChange(async (v) => {
         const s = v.trim();
         if (s === "") {
           blog.syncIntervalMinutes = void 0;
@@ -5301,12 +5549,12 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
         }
         await plugin.saveSettings();
       }));
-      new import_obsidian10.Setting(containerEl).setName("Test connection").addButton((btn) => btn.setButtonText("Test").onClick(async () => {
+      new import_obsidian11.Setting(containerEl).setName("Test connection").addButton((btn) => btn.setButtonText("Test").onClick(async () => {
         const title = await plugin.getClientForBlog(blog).testConnection();
-        new import_obsidian10.Notice(title ? `Connected to ${title}` : `Failed to connect to ${blog.name}`);
+        new import_obsidian11.Notice(title ? `Connected to ${title}` : `Failed to connect to ${blog.name}`);
       }));
     });
-    new import_obsidian10.Setting(containerEl).addButton((b) => b.setButtonText("Add blog").setCta().onClick(async () => {
+    new import_obsidian11.Setting(containerEl).addButton((b) => b.setButtonText("Add blog").setCta().onClick(async () => {
       const id = plugin.genBlogId();
       const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: plugin.ghostPostsRoot(), folderAuto: true };
       plugin.settings.blogs.push(blog);
@@ -5315,7 +5563,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
       await plugin.saveSettings();
       this.display();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Organize folders by domain").setDesc(`Move each blog's notes into ${plugin.ghostPostsRoot()}/<domain> (derived from its site address) and point the blog folders there. Notes are moved with link updates.`).addButton((b) => b.setButtonText("Organize").onClick(() => {
+    new import_obsidian11.Setting(containerEl).setName("Organize folders by domain").setDesc(`Move each blog's notes into ${plugin.ghostPostsRoot()}/<domain> (derived from its site address) and point the blog folders there. Notes are moved with link updates.`).addButton((b) => b.setButtonText("Organize").onClick(() => {
       new SimpleConfirmModal(
         this.app,
         "Organize blog folders?",
@@ -5326,7 +5574,7 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
             return;
           void (async () => {
             const { moved, failed } = await plugin.organizeBlogFolders();
-            new import_obsidian10.Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED \u2014 those notes stayed put, see console` : ""}`);
+            new import_obsidian11.Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED \u2014 those notes stayed put, see console` : ""}`);
             this.display();
           })();
         }
@@ -5337,66 +5585,74 @@ var GhostWriterSettingTab = class extends import_obsidian10.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     this.renderBlogsSettings(containerEl);
-    new import_obsidian10.Setting(containerEl).setHeading().setName("Sync settings");
-    new import_obsidian10.Setting(containerEl).setName("Ghost posts root folder").setDesc('Folder that blog folders nest under: each blog with an automatic folder lives in root/domain (e.g. "Ghost Posts/chief.sc").').addText((text) => text.setPlaceholder("Ghost Posts").setValue(this.plugin.settings.syncFolder).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setHeading().setName("Sync settings");
+    new import_obsidian11.Setting(containerEl).setName("Ghost posts root folder").setDesc('Folder that blog folders nest under: each blog with an automatic folder lives in root/domain (e.g. "Ghost Posts/chief.sc").').addText((text) => text.setPlaceholder("Ghost Posts").setValue(this.plugin.settings.syncFolder).onChange(async (value) => {
       const oldRoot = this.plugin.ghostPostsRoot();
       this.plugin.settings.syncFolder = value.trim() || "Ghost Posts";
       for (const b of this.plugin.settings.blogs) {
         if (b.folderAuto === false)
           continue;
-        const cur = (0, import_obsidian10.normalizePath)(b.folder || "");
+        const cur = (0, import_obsidian11.normalizePath)(b.folder || "");
         if (cur === oldRoot || !this.plugin.folderHasNotes(cur)) {
           b.folder = this.plugin.defaultFolderFor(b);
         }
       }
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Sync interval").setDesc("How often to check for changes (in minutes)").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.syncInterval)).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Sync interval").setDesc("How often to check for changes (in minutes)").addText((text) => text.setPlaceholder("15").setValue(String(this.plugin.settings.syncInterval)).onChange(async (value) => {
       const interval = parseInt(value);
       if (!isNaN(interval) && interval > 0) {
         this.plugin.settings.syncInterval = interval;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian10.Setting(containerEl).setName("Auto-import textpacks").setDesc("When a .textpack file appears in the vault \u2014 for instance saved there from your phone \u2014 import it as a blog note and move the pack to trash.").addToggle((t) => t.setValue(this.plugin.settings.autoImportTextpacks).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Auto-import textpacks").setDesc("When a .textpack file appears in the vault \u2014 for instance saved there from your phone \u2014 import it as a blog note and move the pack to trash.").addToggle((t) => t.setValue(this.plugin.settings.autoImportTextpacks).onChange(async (value) => {
       this.plugin.settings.autoImportTextpacks = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("YAML prefix").setDesc('Prefix for ghost metadata in frontmatter (e.g., "ghost_" will create ghost_status, ghost_tags)').addText((text) => text.setPlaceholder("Prefix used in YAML keys").setValue(this.plugin.settings.yamlPrefix).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Sync title source").setDesc("Choose which note title source is sent to ghost when syncing.").addDropdown((d) => d.addOption("metadata", "Metadata title property").addOption("heading", "First heading").setValue(this.plugin.settings.syncTitleSource).onChange(async (value) => {
+      this.plugin.settings.syncTitleSource = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian11.Setting(containerEl).setName("Update secondary title on sync").setDesc("When syncing, rewrite the non-primary title slot to match the source sent to ghost.").addToggle((t) => t.setValue(this.plugin.settings.syncUpdateSecondaryTitle).onChange(async (value) => {
+      this.plugin.settings.syncUpdateSecondaryTitle = value;
+      await this.plugin.saveSettings();
+    }));
+    new import_obsidian11.Setting(containerEl).setName("YAML prefix").setDesc('Prefix for ghost metadata in frontmatter (e.g., "ghost_" will create ghost_status, ghost_tags)').addText((text) => text.setPlaceholder("Prefix used in YAML keys").setValue(this.plugin.settings.yamlPrefix).onChange(async (value) => {
       this.plugin.settings.yamlPrefix = value.trim();
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Show sync notifications").setDesc("Show notification popups when syncing files (status bar always shows sync status)").addToggle((toggle) => toggle.setValue(this.plugin.settings.showSyncNotifications).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Show sync notifications").setDesc("Show notification popups when syncing files (status bar always shows sync status)").addToggle((toggle) => toggle.setValue(this.plugin.settings.showSyncNotifications).onChange(async (value) => {
       this.plugin.settings.showSyncNotifications = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setHeading().setName("Deletion");
-    new import_obsidian10.Setting(containerEl).setDesc("Deletion is never automatic. Run the command \u201Cbulk delete posts (local notes + ghost)\u201D to pick a blog, review a checklist of its linked posts, and confirm.");
-    new import_obsidian10.Setting(containerEl).setName("Prompt on folder delete").setDesc("When you delete a folder of synced notes, pop up the same bulk-delete checklist for their ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.").addToggle((toggle) => toggle.setValue(this.plugin.settings.promptDeleteOnFolderDelete).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setHeading().setName("Deletion");
+    new import_obsidian11.Setting(containerEl).setDesc("Deletion is never automatic. Run the command \u201Cbulk delete posts (local notes + ghost)\u201D to pick a blog, review a checklist of its linked posts, and confirm.");
+    new import_obsidian11.Setting(containerEl).setName("Prompt on folder delete").setDesc("When you delete a folder of synced notes, pop up the same bulk-delete checklist for their ghost posts (the local notes are already gone). Nothing is deleted until you confirm. Turn off to ignore folder deletes entirely.").addToggle((toggle) => toggle.setValue(this.plugin.settings.promptDeleteOnFolderDelete).onChange(async (value) => {
       this.plugin.settings.promptDeleteOnFolderDelete = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Confirm each remote delete").setDesc("During a bulk delete, also show a per-post confirmation (post + blog name) with delete / skip / stop. The final bulk confirmation always shows regardless.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmEachRemoteDelete).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Confirm each remote delete").setDesc("During a bulk delete, also show a per-post confirmation (post + blog name) with delete / skip / stop. The final bulk confirmation always shows regardless.").addToggle((toggle) => toggle.setValue(this.plugin.settings.confirmEachRemoteDelete).onChange(async (value) => {
       this.plugin.settings.confirmEachRemoteDelete = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Archive deleted notes").setDesc("When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the ghost post is still deleted). Archived notes are never re-synced.").addToggle((toggle) => toggle.setValue(this.plugin.settings.archiveDeletedNotes).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Archive deleted notes").setDesc("When a bulk delete removes a local note, move it into an archive subfolder of its blog folder instead of trashing it (the ghost post is still deleted). Archived notes are never re-synced.").addToggle((toggle) => toggle.setValue(this.plugin.settings.archiveDeletedNotes).onChange(async (value) => {
       this.plugin.settings.archiveDeletedNotes = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setName("Archive subfolder name").setDesc("Name of the archive subfolder created inside each blog folder (default: archive).").addText((text) => text.setPlaceholder("Archive").setValue(this.plugin.settings.archiveFolderName).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Archive subfolder name").setDesc("Name of the archive subfolder created inside each blog folder (default: archive).").addText((text) => text.setPlaceholder("Archive").setValue(this.plugin.settings.archiveFolderName).onChange(async (value) => {
       this.plugin.settings.archiveFolderName = value.trim() || "Archive";
       await this.plugin.saveSettings();
     }));
-    new import_obsidian10.Setting(containerEl).setHeading().setName("Scheduling");
-    new import_obsidian10.Setting(containerEl).setName("Interval between posts").setDesc("Number of days between scheduled publications").addText((text) => text.setPlaceholder("7").setValue(String(this.plugin.settings.schedulingIntervalDays)).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setHeading().setName("Scheduling");
+    new import_obsidian11.Setting(containerEl).setName("Interval between posts").setDesc("Number of days between scheduled publications").addText((text) => text.setPlaceholder("7").setValue(String(this.plugin.settings.schedulingIntervalDays)).onChange(async (value) => {
       const days = parseInt(value);
       if (!isNaN(days) && days > 0) {
         this.plugin.settings.schedulingIntervalDays = days;
         await this.plugin.saveSettings();
       }
     }));
-    new import_obsidian10.Setting(containerEl).setName("Default publish time").setDesc("Time of day for scheduled posts (e.g. 09:00).").addText((text) => text.setPlaceholder("09:00").setValue(this.plugin.settings.defaultPublishTime).onChange(async (value) => {
+    new import_obsidian11.Setting(containerEl).setName("Default publish time").setDesc("Time of day for scheduled posts (e.g. 09:00).").addText((text) => text.setPlaceholder("09:00").setValue(this.plugin.settings.defaultPublishTime).onChange(async (value) => {
       if (/^\d{2}:\d{2}$/.test(value.trim())) {
         this.plugin.settings.defaultPublishTime = value.trim();
         await this.plugin.saveSettings();

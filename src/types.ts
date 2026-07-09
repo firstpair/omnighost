@@ -14,6 +14,8 @@ export interface GhostBlog {
 	aliases?: string[];       // previous names/tokens accepted by g_blog matching
 }
 
+export type TitlePrimarySource = 'metadata' | 'heading';
+
 /**
  * Plugin settings interface
  * Note: ghostAdminApiKey is stored securely in Obsidian's Secrets (Keychain)
@@ -31,6 +33,8 @@ export interface GhostWriterSettings {
 
 	syncInterval: number; // in minutes
 	autoImportTextpacks: boolean; // import .textpack files that appear in the vault
+	syncTitleSource: TitlePrimarySource; // which title source is sent to Ghost
+	syncUpdateSecondaryTitle: boolean; // update the non-primary title slot on sync
 	yamlPrefix: string;
 	lastSync: number;
 	showSyncNotifications: boolean;
@@ -53,6 +57,8 @@ export const DEFAULT_SETTINGS: GhostWriterSettings = {
 	syncFolder: 'Ghost Posts',
 	syncInterval: 15,
 	autoImportTextpacks: true,
+	syncTitleSource: 'metadata',
+	syncUpdateSecondaryTitle: false,
 	yamlPrefix: 'ghost_',
 	lastSync: 0,
 	showSyncNotifications: true,

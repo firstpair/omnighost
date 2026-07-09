@@ -1,5 +1,6 @@
 import { App, requestUrl, RequestUrlResponse } from 'obsidian';
 import { GhostPost } from '../types';
+import { normalizeGhostSiteUrl } from './url';
 
 const LARGE_IMAGE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
 const TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
@@ -24,7 +25,7 @@ export class GhostAPIClient {
 	private app: App;
 
 	constructor(ghostUrl: string, apiKey: string, app: App) {
-		this.apiUrl = ghostUrl;
+		this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
 		this.apiKey = apiKey;
 		this.app = app;
 	}
@@ -33,7 +34,7 @@ export class GhostAPIClient {
 	 * Update credentials
 	 */
 	updateCredentials(ghostUrl: string, apiKey: string): void {
-		this.apiUrl = ghostUrl;
+		this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
 		this.apiKey = apiKey;
 	}
 

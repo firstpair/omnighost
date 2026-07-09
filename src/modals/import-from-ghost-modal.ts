@@ -1,6 +1,9 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
 import { GhostBlog, GhostPost, GhostWriterSettings } from '../types';
+import { buildGhostEditorUrl } from '../ghost/url';
+
+export { buildGhostEditorUrl };
 
 /**
  * Extract Ghost post ID from an editor URL
@@ -11,14 +14,6 @@ import { GhostBlog, GhostPost, GhostWriterSettings } from '../types';
 export function extractPostIdFromUrl(url: string): string | null {
 	const match = url.match(/\/editor\/post\/([a-f0-9]+)\/?$/i);
 	return match ? match[1] : null;
-}
-
-/**
- * Build a Ghost editor URL from Ghost site URL and post ID
- */
-export function buildGhostEditorUrl(ghostSiteUrl: string, postId: string): string {
-	const base = ghostSiteUrl.replace(/\/$/, '');
-	return `${base}/ghost/#/editor/post/${postId}`;
 }
 
 interface BlogAwareHost {

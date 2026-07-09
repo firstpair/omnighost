@@ -12,6 +12,7 @@
 export interface TextpackGhostMeta {
 	blog?: string;
 	slug?: string;
+	title?: string;
 	tags?: string[];
 	excerpt?: string;
 }
@@ -121,6 +122,7 @@ export async function parseTextpack(buf: ArrayBuffer, fallbackName: string): Pro
 					ghost = {
 						blog: typeof o.blog === 'string' ? o.blog : undefined,
 						slug: typeof o.slug === 'string' ? o.slug : undefined,
+						title: typeof o.title === 'string' ? o.title : undefined,
 						tags: Array.isArray(o.tags) ? o.tags.map(t => String(t)) : undefined,
 						excerpt: typeof o.excerpt === 'string' ? o.excerpt : undefined,
 					};

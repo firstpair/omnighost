@@ -126,12 +126,24 @@ export function markdownToLexical(markdown: string): string {
 
 		// Quote
 		if (line.startsWith('>')) {
-			const quoteLines: string[] = [];
+			const quoteParagraphs: string[][] = [];
+			let quoteLines: string[] = [];
 			while (i < lines.length && lines[i].startsWith('>')) {
-				quoteLines.push(lines[i].replace(/^>\s*/, ''));
+				const quoteLine = lines[i].replace(/^>\s?/, '');
+				if (quoteLine.trim() === '') {
+					if (quoteLines.length > 0) {
+						quoteParagraphs.push(quoteLines);
+						quoteLines = [];
+					}
+				} else {
+					quoteLines.push(quoteLine);
+				}
 				i++;
 			}
-			nodes.push(createQuote(quoteLines.join(' ')));
+			if (quoteLines.length > 0) {
+				quoteParagraphs.push(quoteLines);
+			}
+			nodes.push(createQuote(quoteParagraphs.map(joinParagraphLines)));
 			continue;
 		}
 
@@ -146,8 +158,12 @@ export function markdownToLexical(markdown: string): string {
 		}
 
 		// Regular paragraph
-		nodes.push(createParagraph(line));
-		i++;
+		const paragraphLines: string[] = [];
+		while (i < lines.length && !isBlockStart(lines[i])) {
+			paragraphLines.push(lines[i]);
+			i++;
+		}
+		nodes.push(createParagraph(joinParagraphLines(paragraphLines)));
 	}
 
 	// Ghost rejects a lexical document with no children, so an empty note would
@@ -168,6 +184,23 @@ export function markdownToLexical(markdown: string): string {
 	};
 
 	return JSON.stringify(lexical);
+}
+
+function isBlockStart(line: string): boolean {
+	const trimmed = line.trim();
+	if (trimmed === '') return true;
+	if (trimmed === '--members-only--') return true;
+	if (/^(#{1,6})\s+(.+)$/.test(line)) return true;
+	if (/^[*\-+]\s+/.test(line)) return true;
+	if (/^\d+\.\s+/.test(line)) return true;
+	if (line.startsWith('```')) return true;
+	if (line.startsWith('>')) return true;
+	if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line)) return true;
+	return false;
+}
+
+function joinParagraphLines(lines: string[]): string {
+	return lines.map((paragraphLine) => paragraphLine.trim()).join(' ');
 }
 
 /**
@@ -278,18 +311,20 @@ function createCodeBlock(code: string, language: string): LexicalNode {
 /**
  * Create a quote node
  */
-function createQuote(text: string): LexicalNode {
+function createQuote(paragraphs: string[]): LexicalNode {
+	const quoteParagraphs = paragraphs.length > 0 ? paragraphs : [''];
+
 	return {
 		type: 'quote',
 		version: 1,
-		children: [{
+		children: quoteParagraphs.map((text) => ({
 			type: 'paragraph',
 			version: 1,
 			children: parseInlineFormatting(text),
 			direction: 'ltr',
 			format: '',
 			indent: 0
-		}],
+		})),
 		direction: 'ltr',
 		format: '',
 		indent: 0

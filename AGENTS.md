@@ -83,6 +83,91 @@ In `main.ts`, there's a `DEV_MODE` flag:
 
 **Always set to `false` before releasing!**
 
+### Release and Local Install Skill
+
+Use this when the user asks to bump Omnighost, update the local Obsidian plugin, or copy changed `main.js` / `styles.css` / `manifest.json` into the epaolo vault.
+
+Findings from the 2026-07-08 desktop/iOS sync debug:
+
+- The active repo is `/Users/alexy/src/omnighost`.
+- The local epaolo vault is `/Users/alexy/Documents/epaolo`.
+- The installed plugin folder is `/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost`.
+- The three runtime files Obsidian needs are `main.js`, `styles.css`, and `manifest.json`.
+- Git history showed `0.12.0` as the latest tag, so the YAML hotfix was bumped to `0.12.1`.
+- `manifest.json`, `package.json`, `package-lock.json`, and `versions.json` must stay in sync when bumping a release version.
+- The red Properties/frontmatter failure was caused by hand-written YAML double-quoted strings: a value like `\with` is an invalid YAML escape. Use the shared YAML serializers in `src/frontmatter-parser.ts` (`yamlString`, `yamlStringArray`) for any future string/list frontmatter writes.
+- `Save & sync` can save frontmatter while sync returns `false`; the modal should surface that as an incomplete sync, not only show a saved notice.
+- Repo-wide `npm run lint` may fail if it scans `.agents/skills/obsidian/tools/create-plugin.js` with typed TypeScript rules. For focused validation, run `npx eslint main.ts src/frontmatter-parser.ts src/sync/sync-engine.ts` or another explicit touched-file set.
+- macOS File Provider / provenance can make the epaolo plugin files look writable but reject direct replacement from the Codex shell with `Operation not permitted`. Symptoms included `cp`, `install`, `rsync --inplace`, `rm`, `mv`, `chflags`, `xattr`, and even direct reads failing on the existing live plugin files.
+- After the user grants Terminal.app access, running the copy from Terminal.app succeeds. If Codex shell still cannot read the live files, ask Terminal.app to write checksum output to `/tmp` and read that file.
+- A reload warning about missing `ghost-api-key` is a legacy single-blog remnant. Multi-blog installs should initialize and test clients from the default blog's `apiKeySecretName`; do not call the legacy `loadApiKey()` path during normal plugin startup or ordinary multi-blog sync commands.
+- If a published Ghost post looks ragged with very short, widely spaced lines, inspect whether hard-wrapped Markdown lines became separate Lexical paragraphs. The converter should join consecutive prose lines into one paragraph; otherwise Ghost themes render every source line as its own paragraph.
+- For the First Pair manifesto import debug, `/Users/alexy/src/firstpair/blog/dist/firstpair-manifesto.textpack` contained `text.markdown` byte-for-byte equal to `/Users/alexy/src/firstpair/blog/firstpair-manifesto.md`. The epaolo vault note body was also faithful, except for the expected image-path rewrite into an imported asset folder.
+- The broken `real enough` / `to break` Ghost paragraph was an Omnighost Markdown-to-Lexical conversion bug: source soft wraps must remain one paragraph.
+- The broken red quote rail came from source semantics, not textpack damage: `/Users/alexy/src/firstpair/blog/firstpair-manifesto.md` used three blockquotes separated by unquoted blank lines. Pandoc renders that as three `<blockquote>` elements. For one continuous rail with separated statements, use quoted blank separators:
+
+```markdown
+> Ideas should outlive their implementations.
+>
+> Tools should remain replaceable.
+>
+> Knowledge should remain permanent.
+```
+
+Preferred update command, run from a normal Terminal.app session:
+
+```bash
+cd /Users/alexy/src/omnighost
+scripts/install-epaolo-plugin.sh
+```
+
+If driving it from Codex and Terminal.app has the macOS permission grant, use:
+
+```bash
+osascript <<'APPLESCRIPT'
+tell application "Terminal"
+  activate
+  do script "cd /Users/alexy/src/omnighost && scripts/install-epaolo-plugin.sh"
+end tell
+APPLESCRIPT
+```
+
+Patch-version bump workflow:
+
+```bash
+# Choose the next patch from git history first.
+git tag --sort=-v:refname | head -5
+
+next=0.12.1
+npm version "$next" --no-git-tag-version --ignore-scripts
+node - "$next" <<'NODE'
+const fs = require('fs');
+const next = process.argv[2];
+const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+manifest.version = next;
+fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, '\t') + '\n');
+
+const versions = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+versions[next] = manifest.minAppVersion;
+fs.writeFileSync('versions.json', JSON.stringify(versions, null, '\t') + '\n');
+NODE
+
+scripts/install-epaolo-plugin.sh
+```
+
+Post-copy verification should compare the repo and vault hashes for all three runtime files and confirm the installed manifest version:
+
+```bash
+plugin_dir=/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost
+for file in main.js styles.css manifest.json; do
+  shasum -a 256 "$file" "$plugin_dir/$file"
+done
+python3 - <<'PY'
+import json
+print(json.load(open('/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost/manifest.json'))['version'])
+PY
+```
+
 ## Critical Rules & Constraints
 
 ### Obsidian Plugin Requirements

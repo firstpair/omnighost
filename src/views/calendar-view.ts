@@ -2,6 +2,7 @@ import { ItemView, WorkspaceLeaf, TFile, setIcon, Notice } from 'obsidian';
 import { GhostWriterSettings } from '../types';
 import { GhostAPIClient } from '../ghost/api-client';
 import { GhostPostStatus } from '../types';
+import { buildGhostEditorUrl } from '../ghost/url';
 
 export const CALENDAR_VIEW_TYPE = 'ghost-editorial-calendar';
 
@@ -188,7 +189,6 @@ export class CalendarView extends ItemView {
 		}
 
 		const vaultIndex = this.buildVaultIndex();
-		const baseUrl = this.settings.ghostUrl.replace(/\/$/, '');
 
 		this.posts = rawPosts
 			.filter(p => p.published_at !== null)
@@ -198,7 +198,7 @@ export class CalendarView extends ItemView {
 				status: p.status,
 				publishedAt: new Date(p.published_at as string),
 				vaultFile: vaultIndex.get(p.id) ?? null,
-				ghostAdminUrl: `${baseUrl}/ghost/#/editor/post/${p.id}`
+				ghostAdminUrl: buildGhostEditorUrl(this.settings.ghostUrl, p.id)
 			}))
 			.sort((a, b) => a.publishedAt.getTime() - b.publishedAt.getTime());
 	}

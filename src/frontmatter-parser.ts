@@ -144,6 +144,23 @@ export function removeFrontmatterKeys(fileContent: string, keys: string[]): stri
 }
 
 /**
+ * Serialize a string as a YAML-safe double-quoted scalar.
+ * JSON string syntax is valid YAML and correctly escapes backslashes, quotes,
+ * and control characters that Obsidian's YAML parser rejects in raw strings.
+ */
+export function yamlString(value: string, singleLine = false): string {
+	const normalized = singleLine ? value.replace(/[\r\n]+/g, ' ') : value;
+	return JSON.stringify(normalized);
+}
+
+/**
+ * Serialize strings as a YAML-safe flow sequence.
+ */
+export function yamlStringArray(values: string[], singleLine = false): string {
+	return `[${values.map((value) => yamlString(value, singleLine)).join(', ')}]`;
+}
+
+/**
  * Parse Ghost metadata from frontmatter
  */
 export function parseGhostMetadata(

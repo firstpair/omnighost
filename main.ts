@@ -1,5 +1,5 @@
 import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TAbstractFile, TFolder, normalizePath, debounce, Modal, ButtonComponent, parseYaml, stringifyYaml, setIcon } from 'obsidian';
-import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog } from './src/types';
+import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog, TitlePrimarySource } from './src/types';
 import { GhostAPIClient } from './src/ghost/api-client';
 import { generateNewPostTemplate, addGhostPropertiesToContent } from './src/templates';
 import { SyncEngine } from './src/sync/sync-engine';
@@ -9,10 +9,13 @@ import { LinkToGhostModal } from './src/modals/link-to-ghost-modal';
 import { EditGhostPropertiesModal, GhostPropsForm } from './src/modals/edit-properties-modal';
 import { MigratePrefixModal } from './src/modals/migrate-prefix-modal';
 import { SelectBlogsModal } from './src/modals/select-blogs-modal';
-import { upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, removeFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix } from './src/frontmatter-parser';
+import { upsertGhostMetadata, splitFrontmatter, joinFrontmatter, upsertFrontmatterKeys, removeFrontmatterKeys, parseGhostMetadata, migrateFrontmatterPrefix, yamlString, yamlStringArray } from './src/frontmatter-parser';
 import { htmlToMarkdown } from './src/converters/html-to-markdown';
 import { parseTextpack, ParsedTextpack } from './src/importers/textpack';
+import { analyzeTextpackTitle, normalizeTextpackTitle } from './src/title-policy';
+import type { TextpackTitleOptions } from './src/title-policy';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
+import { buildGhostEditorUrl, ghostHostname, normalizeGhostSiteUrl } from './src/ghost/url';
 
 // ⚠️ IMPORTANT: Set to false before production build/release
 // Development mode flag - enables auto-sync on file changes (2s debounce)
@@ -63,13 +66,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		await this.migrateLegacyImageCache();
 		await this.migrateBlogs();
 
-		// Get API key from secure keychain
-		const apiKey = this.loadApiKey();
+		const defaultCredentials = this.defaultGhostClientCredentials();
 
 		// Initialize Ghost API client
 		this.ghostClient = new GhostAPIClient(
-			this.settings.ghostUrl,
-			apiKey,
+			defaultCredentials.url,
+			defaultCredentials.apiKey,
 			this.app
 		);
 
@@ -212,8 +214,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'add-ghost-properties',
 			name: 'Add ghost properties to current note',
-			editorCallback: (_editor, view) => {
-				void this.addGhostPropertiesToCurrentNote(view.file);
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				void this.addGhostPropertiesToCurrentNote(file);
 			}
 		});
 
@@ -221,8 +225,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'sync-current-note',
 			name: 'Sync current note to ghost',
-			editorCallback: (_editor, view) => {
-				void this.syncCurrentNote(view.file);
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				void this.syncCurrentNote(file);
 			}
 		});
 
@@ -244,9 +250,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'seed-note-from-ghost-by-slug',
 			name: 'Seed note from existing ghost post (by slug)',
-			editorCallback: (_editor, view) => {
-				if (!view.file) { new Notice('No active file'); return; }
-				void this.seedActiveNoteFromGhost(view.file);
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				void this.seedActiveNoteFromGhost(file);
 			}
 		});
 
@@ -254,9 +261,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'edit-ghost-properties',
 			name: 'Edit ghost properties (modal)',
-			editorCallback: (_editor, view) => {
-				if (!view.file) { new Notice('No active file'); return; }
-				void this.openEditPropertiesModal(view.file);
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				void this.openEditPropertiesModal(file);
 			}
 		});
 
@@ -280,9 +288,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'set-note-blogs',
 			name: 'Set blog(s) for this note',
-			editorCallback: (_editor, view) => {
-				if (!view.file) { new Notice('No active file'); return; }
-				this.openSetBlogsModal(view.file);
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				this.openSetBlogsModal(file);
 			}
 		});
 
@@ -346,13 +355,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'debug-ghost-properties',
 			name: 'Debug: show ghost properties in current note',
-			editorCallback: (_editor, view) => {
-				if (!view.file) {
-					new Notice('No active file');
-					return;
-				}
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
 
-				const cache = this.app.metadataCache.getFileCache(view.file);
+				const cache = this.app.metadataCache.getFileCache(file);
 				if (!cache?.frontmatter) {
 					new Notice('No frontmatter found');
 					console.debug('[Ghost Debug] No frontmatter');
@@ -381,19 +388,20 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'debug-test-jwt',
 			name: 'Debug: test JWT token generation',
 			callback: async () => {
-				const apiKey = this.loadApiKey();
-				if (!this.settings.ghostUrl || !apiKey) {
-					new Notice('Please configure ghost URL and admin API key first');
+				const { blog, url, apiKey } = this.defaultGhostClientCredentials();
+				if (!url || !apiKey) {
+					new Notice('Please configure a blog URL and admin API key first');
 					return;
 				}
 
 				try {
 					console.debug('[Ghost Debug] Testing JWT generation...');
-					console.debug('[Ghost Debug] Ghost URL:', this.settings.ghostUrl);
+					console.debug('[Ghost Debug] Ghost URL:', url);
 					console.debug('[Ghost Debug] API key format:', apiKey.includes(':') ? 'Valid (contains :)' : 'Invalid (missing :)');
 
 					// Test connection which will generate and use a JWT
-					const result = await this.ghostClient.testConnection();
+					const client = blog ? this.getClientForBlog(blog) : this.ghostClient;
+					const result = await client.testConnection();
 					if (result) {
 						new Notice('JWT generation successful! Connection works.');
 						console.debug('[Ghost Debug] JWT and connection working');
@@ -412,12 +420,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'debug-show-file-data',
 			name: 'Debug: show file content and metadata',
-			editorCallback: (_editor, view) => {
-				const file = view.file;
-				if (!file) {
-					new Notice('No active file');
-					return;
-				}
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
 
 				void this.app.vault.read(file).then((content) => {
 					const cache = this.app.metadataCache.getFileCache(file);
@@ -440,14 +445,21 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		this.addCommand({
 			id: 'schedule-current-note',
 			name: 'Schedule current note',
-			editorCheckCallback: (checking, _editor, ctx) => {
-				if (ctx.file) {
-					if (!checking) void this.scheduleCurrentNote(ctx.file);
-					return true;
-				}
-				return false;
+			callback: () => {
+				const file = this.activeMarkdownFile();
+				if (!file) return;
+				void this.scheduleCurrentNote(file);
 			}
 		});
+	}
+
+	private activeMarkdownFile(): TFile | null {
+		const file = this.app.workspace.getActiveFile();
+		if (!file || file.extension !== 'md') {
+			new Notice('Open a note first');
+			return null;
+		}
+		return file;
 	}
 
 	async activateCalendarView(): Promise<void> {
@@ -618,14 +630,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	async testGhostConnection(): Promise<void> {
-		const apiKey = this.loadApiKey();
-		if (!this.settings.ghostUrl || !apiKey) {
-			new Notice('Please configure ghost URL and admin API key first');
+		const { blog, url, apiKey } = this.defaultGhostClientCredentials();
+		if (!url || !apiKey) {
+			new Notice('Please configure a blog URL and admin API key first');
 			return;
 		}
 
 		try {
-			const title = await this.ghostClient.testConnection();
+			const client = blog ? this.getClientForBlog(blog) : this.ghostClient;
+			const title = await client.testConnection();
 			if (title) {
 				new Notice(`Successfully connected to ${title}`);
 			} else {
@@ -638,9 +651,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	async syncWithGhost(): Promise<void> {
-		const apiKey = this.loadApiKey();
-		if (!this.settings.ghostUrl || !apiKey) {
-			new Notice('Please configure ghost URL and admin API key first');
+		if (!this.hasAnyConfiguredBlogCredentials()) {
+			new Notice('Please configure a blog URL and admin API key first');
 			return;
 		}
 
@@ -808,12 +820,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	private deriveBlogName(url: string): string {
-		try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; }
+		return ghostHostname(url);
 	}
 
 	/** Lowercased hostname of a URL, or '' if unparseable. */
 	hostOf(url: string): string {
-		try { return new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return ''; }
+		return ghostHostname(url);
 	}
 
 	/** Root folder all blog folders nest under (the legacy sync folder, default "Ghost Posts"). */
@@ -921,6 +933,28 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			console.error('[Ghost] Error loading secret', secretName, e);
 			return '';
 		}
+	}
+
+	private defaultGhostClientCredentials(): { blog: GhostBlog | null; url: string; apiKey: string } {
+		const blog = this.defaultBlog();
+		if (blog) {
+			return {
+				blog,
+				url: blog.url,
+				apiKey: this.loadApiKeyForSecret(blog.apiKeySecretName)
+			};
+		}
+		return {
+			blog: null,
+			url: this.settings.ghostUrl,
+			apiKey: this.loadApiKey()
+		};
+	}
+
+	private hasAnyConfiguredBlogCredentials(): boolean {
+		return this.settings.blogs.some((blog) =>
+			!!blog.url.trim() && !!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()
+		);
 	}
 
 	/** Migrate the legacy single-blog config into blogs[] on first run. */
@@ -1181,7 +1215,11 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			try {
 				const d = parseYaml(split0.raw) as unknown;
 				if (d && typeof d === 'object') fmObj = d as Record<string, unknown>;
-			} catch { /* ignore */ }
+			} catch (e) {
+				console.debug('[Ghost Sync] Cannot sync note with invalid frontmatter:', file.path, e);
+				new Notice(`Cannot sync "${file.basename}": frontmatter YAML is invalid. Fix the red properties and try again.`);
+				return false;
+			}
 		}
 		const fmStr = (k: string) => typeof fmObj[k] === 'string' ? String(fmObj[k]) : '';
 		const hadOldMaps = `${prefix}ids` in fmObj || `${prefix}public_urls` in fmObj;
@@ -1209,10 +1247,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 			const post = this.syncEngine.lastSyncedPost;
 			if (post) {
-				const editorUrl = `${blog.url.replace(/\/$/, '')}/ghost/#/editor/post/${post.id}`;
+				const editorUrl = buildGhostEditorUrl(blog.url, post.id);
+				const isPublic = post.status === 'published' || post.status === 'scheduled';
 				if (fmStr(keys.id) !== post.id) updates[keys.id] = post.id;
 				if (fmStr(keys.url) !== editorUrl) updates[keys.url] = editorUrl;
-				if (post.url && fmStr(keys.pub) !== post.url) updates[keys.pub] = post.url;
+				if (isPublic && post.url && fmStr(keys.pub) !== post.url) {
+					updates[keys.pub] = post.url;
+				} else if (!isPublic && keys.pub in fmObj) {
+					staleKeys.push(keys.pub);
+				}
 				if (!wroteSlug && post.slug) { updates[`${prefix}slug`] = post.slug; wroteSlug = true; }
 				// Purge name/alias-suffix variants now that the domain key is authoritative.
 				for (const k of this.blogReadSuffixes(blog)) {
@@ -1294,16 +1337,20 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	/** Import a parsed .textpack as a new note in `blog`'s folder: write its
 	 *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
 	 *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
-	async importTextpack(pack: ParsedTextpack, blog: GhostBlog): Promise<void> {
+	async importTextpack(pack: ParsedTextpack, blog: GhostBlog, titleOptions?: TextpackTitleOptions): Promise<void> {
 		const prefix = this.settings.yamlPrefix;
 		const slug = (pack.ghost.slug || pack.name).toLowerCase()
 			.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'post';
 		const folder = normalizePath(blog.folder || this.settings.syncFolder);
-		const heading = pack.markdown.match(/^#\s+(.+)$/m);
-		const title = (heading ? heading[1] : pack.name).trim();
+		const titleAnalysis = analyzeTextpackTitle(pack);
+		const normalizedTitle = normalizeTextpackTitle(pack, titleOptions ?? {
+			primarySource: titleAnalysis.defaultSource,
+			updateSecondary: true
+		});
+		const title = normalizedTitle.title;
 		const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || slug;
 
-		let markdown = pack.markdown;
+		let markdown = normalizedTitle.markdown;
 		if (pack.assets.size > 0) {
 			const assetDir = normalizePath(`${folder}/assets/${slug}`);
 			if (!this.app.vault.getAbstractFileByPath(assetDir)) {
@@ -1322,15 +1369,14 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		let content = addGhostPropertiesToContent(markdown, this.settings);
-		const esc = (s: string): string => s.replace(/\n/g, ' ').replace(/"/g, '\\"');
 		const upserts: Record<string, string> = {
 			[`${prefix}blog`]: this.blogPropertyYaml([blog]),
 			[`${prefix}slug`]: slug,
 		};
 		if (pack.ghost.tags && pack.ghost.tags.length > 0) {
-			upserts[`${prefix}tags`] = `[${pack.ghost.tags.map(t => `"${esc(t)}"`).join(', ')}]`;
+			upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
 		}
-		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = `"${esc(pack.ghost.excerpt)}"`;
+		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
 		content = upsertFrontmatterKeys(content, upserts);
 
 		if (!this.app.vault.getAbstractFileByPath(folder)) {
@@ -1412,7 +1458,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 			let count = 0;
 			for (const post of posts) {
-				const editorUrl = `${blog.url.replace(/\/$/, '')}/ghost/#/editor/post/${post.id}`;
+				const editorUrl = buildGhostEditorUrl(blog.url, post.id);
 				await this.writePostAsNoteInFolder(post, editorUrl, folder, blog);
 				count++;
 			}
@@ -1535,17 +1581,16 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const availableBlogs = this.settings.blogs.map(b => ({ id: b.id, name: b.name }));
 		new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
 			const tags = form.tags.split(',').map(t => t.trim()).filter(Boolean);
-			const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
-			const escq = (s: string): string => s.replace(/\n/g, ' ').replace(/"/g, '\\"');
+			const tagsYaml = yamlStringArray(tags, true);
 			const ghostFields: Record<string, string> = {
 				post_access: form.visibility,
 				published: form.status === 'draft' ? 'false' : 'true',
-				published_at: form.status === 'schedule' && form.publishedAt ? `"${form.publishedAt}"` : '""',
+				published_at: yamlString(form.status === 'schedule' && form.publishedAt ? form.publishedAt : '', true),
 				featured: form.featured ? 'true' : 'false',
 				cover_from_first_image: form.coverFromFirstImage ? 'true' : 'false',
-				excerpt: `"${escq(form.excerpt)}"`,
-				feature_image: `"${form.featureImage}"`,
-				slug: form.slug,
+				excerpt: yamlString(form.excerpt, true),
+				feature_image: yamlString(form.featureImage, true),
+				slug: yamlString(form.slug, true),
 				tags: tagsYaml
 			};
 			const selectedBlogs = form.blogIds
@@ -1563,7 +1608,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			new Notice('Ghost properties saved');
 			if (doSync) {
 				try {
-					await this.syncFileToBlogs(file, selectedBlogs.length ? selectedBlogs : this.resolveBlogsForFile(file));
+					const synced = await this.syncFileToBlogs(file, selectedBlogs.length ? selectedBlogs : this.resolveBlogsForFile(file));
+					if (!synced) {
+						new Notice('Ghost properties saved, but sync did not complete. Check the note properties and blog settings.');
+					}
 				} catch (e) {
 					new Notice(`Sync failed: ${(e as Error).message}`);
 				}
@@ -1632,17 +1680,17 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			if (source === 'ghost') {
 				const s = blog ? this.blogKeyFor(blog) : '';
 				const tags = (post.tags ?? []).map(t => t.name);
-				const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
+				const tagsYaml = yamlStringArray(tags, true);
 				const ghostFields: Record<string, string> = {
 					post_access: post.visibility ?? 'public',
 					published: (post.status === 'published' || post.status === 'scheduled') ? 'true' : 'false',
-					published_at: `"${post.published_at ?? ''}"`,
+					published_at: yamlString(post.published_at ?? '', true),
 					featured: post.featured ? 'true' : 'false',
 					tags: tagsYaml,
-					excerpt: `"${(post.excerpt ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"')}"`,
-					feature_image: `"${post.feature_image ?? ''}"`,
+					excerpt: yamlString(post.excerpt ?? '', true),
+					feature_image: yamlString(post.feature_image ?? '', true),
 					no_sync: 'false',
-					slug: post.slug,
+					slug: yamlString(post.slug, true),
 				};
 				if (blog) {
 					ghostFields[`id_${s}`] = post.id;
@@ -1704,9 +1752,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 
 		// Check credentials
-		const apiKey = this.loadApiKey();
-		if (!this.settings.ghostUrl || !apiKey) {
-			new Notice('Please configure ghost URL and admin API key first');
+		if (!this.hasAnyConfiguredBlogCredentials()) {
+			new Notice('Please configure a blog URL and admin API key first');
 			return;
 		}
 
@@ -2378,6 +2425,10 @@ class SimpleConfirmModal extends Modal {
 class ImportTextpackModal extends Modal {
 	private parsed: ParsedTextpack | null = null;
 	private blogSelect: HTMLSelectElement | null = null;
+	private titleSource: TitlePrimarySource = 'heading';
+	private updateSecondaryTitle = true;
+	private titleSelect: HTMLSelectElement | null = null;
+	private titleDesc: HTMLElement | null = null;
 	constructor(app: App, private plugin: GhostWriterManagerPlugin) {
 		super(app);
 	}
@@ -2401,6 +2452,12 @@ class ImportTextpackModal extends Modal {
 				try {
 					this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
 					const hint = this.parsed.ghost.blog;
+					const titleAnalysis = analyzeTextpackTitle(this.parsed);
+					this.titleSource = titleAnalysis.defaultSource;
+					if (this.titleSelect) this.titleSelect.value = this.titleSource;
+					if (this.titleDesc) {
+						this.titleDesc.setText(this.describeImportTitles(titleAnalysis));
+					}
 					status.setText(`"${this.parsed.name}" — ${this.parsed.assets.size} image(s)${hint ? `, blog: ${hint}` : ''}`);
 					const hinted = hint
 						? this.plugin.settings.blogs.find(b => this.plugin.blogMatchesToken(b, hint))
@@ -2420,6 +2477,32 @@ class ImportTextpackModal extends Modal {
 			this.blogSelect = d.selectEl;
 		});
 
+		new Setting(contentEl)
+			.setName('Primary title on import')
+				.setDesc('Choose which source becomes the publishing title. Imported notes collapse a leading heading when it duplicates the chosen title.')
+				.addDropdown(d => {
+					d.addOption('heading', 'First heading');
+					d.addOption('metadata', 'Metadata title');
+				d.setValue(this.titleSource);
+				d.onChange((value) => {
+					this.titleSource = value as TitlePrimarySource;
+				});
+				this.titleSelect = d.selectEl;
+			});
+
+		new Setting(contentEl)
+			.setName('Update secondary title')
+			.setDesc('When the chosen source differs, rewrite the other title slot to match before collapsing duplicate headings.')
+			.addToggle(t => t
+				.setValue(this.updateSecondaryTitle)
+				.onChange((value) => {
+					this.updateSecondaryTitle = value;
+				}));
+
+			this.titleDesc = contentEl.createEl('p', {
+				text: 'Choose a textpack to inspect its metadata title and first heading.'
+			});
+
 		const row = contentEl.createDiv({ cls: 'modal-button-container' });
 		new ButtonComponent(row).setButtonText('Import').setCta().onClick(() => {
 			void (async () => {
@@ -2428,7 +2511,10 @@ class ImportTextpackModal extends Modal {
 				if (!blog) { new Notice('No blog configured — add one in settings.'); return; }
 				this.close();
 				try {
-					await this.plugin.importTextpack(this.parsed, blog);
+					await this.plugin.importTextpack(this.parsed, blog, {
+						primarySource: this.titleSource,
+						updateSecondary: this.updateSecondaryTitle
+					});
 				} catch (e) {
 					new Notice(`Import failed: ${(e as Error).message}`);
 				}
@@ -2438,6 +2524,13 @@ class ImportTextpackModal extends Modal {
 	}
 	onClose(): void {
 		this.contentEl.empty();
+	}
+
+	private describeImportTitles(analysis: ReturnType<typeof analyzeTextpackTitle>): string {
+		const metadata = analysis.metadataTitle ? `"${analysis.metadataTitle}"` : 'none';
+		const heading = analysis.headingTitle ? `"${analysis.headingTitle}"` : 'none';
+		const conflict = analysis.hasConflict ? ' Conflict found.' : '';
+		return `Metadata title: ${metadata}. First H1: ${heading}.${conflict}`;
 	}
 }
 
@@ -2626,8 +2719,21 @@ class GhostWriterSettingTab extends PluginSettingTab {
 					t.inputEl.addEventListener('blur', () => {
 						void (async () => {
 							const prevHost = plugin.hostOf(originalUrl);
+							const normalizedUrl = normalizeGhostSiteUrl(blog.url);
+							let normalizedChanged = false;
+							if (normalizedUrl && normalizedUrl !== blog.url) {
+								blog.url = normalizedUrl;
+								t.setValue(normalizedUrl);
+								normalizedChanged = true;
+							}
 							const newHost = plugin.hostOf(blog.url);
-							if (newHost === prevHost) return;
+							if (newHost === prevHost) {
+								if (normalizedChanged) {
+									originalUrl = blog.url;
+									await plugin.saveSettings();
+								}
+								return;
+							}
 							originalUrl = blog.url;
 							// The domain is the blog's stable identity: keep the old one as
 							// an alias so existing g_blog tokens and g_id_<domain> keys
@@ -2827,6 +2933,28 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.autoImportTextpacks)
 				.onChange(async (value) => {
 					this.plugin.settings.autoImportTextpacks = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Sync title source')
+				.setDesc('Choose which note title source is sent to ghost when syncing.')
+				.addDropdown(d => d
+					.addOption('metadata', 'Metadata title property')
+					.addOption('heading', 'First heading')
+				.setValue(this.plugin.settings.syncTitleSource)
+				.onChange(async (value) => {
+					this.plugin.settings.syncTitleSource = value as TitlePrimarySource;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Update secondary title on sync')
+				.setDesc('When syncing, rewrite the non-primary title slot to match the source sent to ghost.')
+			.addToggle(t => t
+				.setValue(this.plugin.settings.syncUpdateSecondaryTitle)
+				.onChange(async (value) => {
+					this.plugin.settings.syncUpdateSecondaryTitle = value;
 					await this.plugin.saveSettings();
 				}));
 

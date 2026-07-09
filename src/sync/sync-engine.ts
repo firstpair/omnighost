@@ -1,11 +1,13 @@
 import { App, TFile, Notice, parseYaml } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
 import { GhostWriterSettings, GhostPost } from '../types';
-import { parseGhostMetadata, extractContent, updateFrontmatterWithGhostId, updateFrontmatterWithGhostUrl, upsertGhostMetadata, splitFrontmatter, joinFrontmatter } from '../frontmatter-parser';
+import { parseGhostMetadata, extractContent, updateFrontmatterWithGhostId, updateFrontmatterWithGhostUrl, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, yamlString, yamlStringArray } from '../frontmatter-parser';
 import { generateSlug, normalizePaywallMarker } from '../converters/markdown-to-html';
 import { htmlToMarkdown } from '../converters/html-to-markdown';
 import { markdownToLexical } from '../converters/markdown-to-lexical';
 import { processPostImages } from '../ghost/image-uploader';
+import { buildGhostEditorUrl, ghostHostname, normalizeGhostSiteUrl } from '../ghost/url';
+import { analyzeTitleSources, resolvePrimaryTitle, updateSecondaryTitle } from '../title-policy';
 
 /**
  * Sync Engine - Handles synchronization from Obsidian to Ghost
@@ -40,7 +42,7 @@ export class SyncEngine {
 		this.ghostClient = ghostClient;
 		this.imageCache = imageCache;
 		this.saveImageCache = saveImageCache;
-		this.activeBaseUrl = settings.ghostUrl;
+		this.activeBaseUrl = normalizeGhostSiteUrl(settings.ghostUrl);
 		this.activeFolder = settings.syncFolder;
 	}
 
@@ -52,7 +54,7 @@ export class SyncEngine {
 	 */
 	setActiveBlog(client: GhostAPIClient, baseUrl: string, folder: string, writeBack: boolean, knownId?: string, blogName = ''): void {
 		this.ghostClient = client;
-		this.activeBaseUrl = baseUrl;
+		this.activeBaseUrl = normalizeGhostSiteUrl(baseUrl);
 		this.activeFolder = folder;
 		this.writeBack = writeBack;
 		this.activeKnownId = knownId;
@@ -60,12 +62,7 @@ export class SyncEngine {
 	}
 
 	private activeBlogKeySuffix(): string {
-		let base = this.activeBlogName;
-		try {
-			base = new URL(this.activeBaseUrl).hostname.replace(/^www\./, '').toLowerCase() || base;
-		} catch {
-			// Keep activeBlogName fallback.
-		}
+		const base = ghostHostname(this.activeBaseUrl) || this.activeBlogName;
 		return base.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'blog';
 	}
 
@@ -85,25 +82,23 @@ export class SyncEngine {
 		}
 
 		const prefix = this.settings.yamlPrefix;
-		const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
-		const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${post.id}`;
+		const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, post.id);
 		const blogSuffix = this.activeBlogKeySuffix();
 		const isPublic = post.status === 'published' || post.status === 'scheduled';
 
 		const tags = (post.tags ?? []).map(t => t.name);
-		const tagsYaml = tags.length > 0 ? `[${tags.map(t => `"${t}"`).join(', ')}]` : '[]';
-		const excerpt = (post.excerpt ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '\\"');
+		const tagsYaml = yamlStringArray(tags, true);
 
 		const ghostFields: Record<string, string> = {
 			post_access: post.visibility ?? 'public',
 			published: isPublic ? 'true' : 'false',
-			published_at: `"${post.published_at ?? ''}"`,
+			published_at: yamlString(post.published_at ?? '', true),
 			featured: post.featured ? 'true' : 'false',
 			tags: tagsYaml,
-			excerpt: `"${excerpt}"`,
-			feature_image: `"${post.feature_image ?? ''}"`,
+			excerpt: yamlString(post.excerpt ?? '', true),
+			feature_image: yamlString(post.feature_image ?? '', true),
 			no_sync: 'false',
-			slug: post.slug,
+			slug: yamlString(post.slug, true),
 			[`id_${blogSuffix}`]: post.id,
 			[`url_${blogSuffix}`]: ghostEditorUrl
 		};
@@ -166,6 +161,7 @@ export class SyncEngine {
 					if (d && typeof d === 'object') diskFm = d as Record<string, unknown>;
 				} catch (e) {
 					console.debug('[Ghost Sync] Disk frontmatter parse failed:', e);
+					throw new Error('Frontmatter YAML is invalid. Fix the red properties before syncing.');
 				}
 			}
 			const cacheFm = (cache.frontmatter ?? {}) as Record<string, unknown>;
@@ -229,12 +225,11 @@ export class SyncEngine {
 			console.debug('[Ghost Sync] Lexical length:', lexical.length);
 			console.debug('[Ghost Sync] Lexical preview:', lexical.substring(0, 200));
 
-			// Title: use the first H1 heading if present, otherwise the note's
-			// filename. Do NOT fall back to the first body line — for a note with no
-			// heading that would be a whole paragraph, producing an over-long title
-			// and slug (Ghost rejects slugs over 191 chars).
-			const h1 = markdownContent.match(/^#\s+(.+)$/m);
-			let title = (h1 ? h1[1].trim() : '') || file.basename;
+			// Title: use the configured primary source, then fall back to the other
+			// title slot and finally the note filename. Do NOT fall back to the first
+			// body line — Ghost rejects over-long accidental titles/slugs.
+			const titleAnalysis = analyzeTitleSources(content, file.basename);
+			let title = resolvePrimaryTitle(titleAnalysis, this.settings.syncTitleSource);
 			title = title.slice(0, 255);
 			console.debug('[Ghost Sync] Extracted title:', title);
 
@@ -367,8 +362,7 @@ export class SyncEngine {
 				const needsUrl = !metadata.ghost_url;
 				const needsPublic = !!publicUrl && metadata.public_url !== publicUrl;
 				if (this.writeBack && ownsClean && (needsId || needsUrl || needsPublic)) {
-					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
-					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${targetId}`;
+					const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, targetId);
 					const syncedPost = ghostPost;
 					// vault.process: the network round-trip above can race a user edit,
 					// so apply the frontmatter write-back to the file's CURRENT content.
@@ -397,8 +391,7 @@ export class SyncEngine {
 				// right after publishing (e.g. for the properties modal).
 				if (this.writeBack) {
 					const capturedGhostPost = ghostPost;
-					const baseUrl = this.activeBaseUrl.replace(/\/$/, '');
-					const ghostEditorUrl = `${baseUrl}/ghost/#/editor/post/${capturedGhostPost.id}`;
+					const ghostEditorUrl = buildGhostEditorUrl(this.activeBaseUrl, capturedGhostPost.id);
 					const publicUrl = (status === 'published' || status === 'scheduled') ? (capturedGhostPost.url || undefined) : undefined;
 					// vault.process: the create round-trip above can race a user edit,
 					// so apply the frontmatter write-back to the file's CURRENT content.
@@ -417,6 +410,11 @@ export class SyncEngine {
 
 			// Expose the synced post so the plugin can record per-blog ids/URLs
 			this.lastSyncedPost = ghostPost;
+
+			if (this.settings.syncUpdateSecondaryTitle) {
+				const primarySource = this.settings.syncTitleSource;
+				await this.app.vault.process(file, (raw) => updateSecondaryTitle(raw, title, primarySource));
+			}
 
 			// Update last sync time
 			this.settings.lastSync = Date.now();
