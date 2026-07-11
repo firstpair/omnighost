@@ -31,7 +31,7 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 
 ### Manual install (desktop or iOS)
 
-1. Download the latest release files from the [Releases page](https://github.com/alexy/omnighost/releases):
+1. Download the latest release files from the [Releases page](https://github.com/firstpair/omnighost/releases):
    - `main.js`
    - `manifest.json`
    - `styles.css`
@@ -49,7 +49,7 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 
 1. Install **Obsidian42 - BRAT** from Community plugins and enable it.
 2. Run the command **"BRAT: Add a beta plugin for testing"**.
-3. Enter the repo: **`alexy/omnighost`** and confirm.
+3. Enter the repo: **`firstpair/omnighost`** and confirm.
 4. Enable **Omnighost** under Community plugins.
 
 BRAT will keep it updated as new releases are published.
@@ -58,7 +58,7 @@ BRAT will keep it updated as new releases are published.
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/alexy/omnighost.git
+   git clone https://github.com/firstpair/omnighost.git
    cd omnighost
    ```
 2. Install dependencies:
@@ -229,4 +229,4 @@ Licensed under the **MIT License** — see [LICENSE](LICENSE). Original work © 
 
 ## Support
 
-Please [open an issue](https://github.com/alexy/omnighost/issues) for bugs or questions about this fork.
+Please [open an issue](https://github.com/firstpair/omnighost/issues) for bugs or questions about this fork.

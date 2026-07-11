@@ -368,7 +368,7 @@ git push --tags      # Push release
 
 ## Contact & Support
 
-- **Repository**: https://github.com/diegoeis/ghost-writer-manager-plugin
+- **Repository**: https://github.com/firstpair/omnighost
 - **Issues**: GitHub Issues
 - **License**: MIT
 

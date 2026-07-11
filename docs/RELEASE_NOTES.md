@@ -10,7 +10,7 @@ Patch release with type safety and lint fixes introduced in 0.2.0.
 
 ---
 
-**Full changelog**: https://github.com/diegoeis/ghost-writer-manager-plugin/compare/0.2.0...0.2.1
+**Full changelog**: https://github.com/firstpair/omnighost/compare/0.2.0...0.2.1
 
 ---
 
@@ -42,7 +42,7 @@ Download `main.js`, `manifest.json`, and `styles.css` from this release and copy
 
 ---
 
-**Full changelog**: https://github.com/diegoeis/ghost-writer-manager-plugin/compare/0.1.2...0.2.0
+**Full changelog**: https://github.com/firstpair/omnighost/compare/0.1.2...0.2.0
 
 ---
 
@@ -212,11 +212,11 @@ MIT License - See LICENSE file for details
 
 ## 🔗 Links
 
-- [GitHub Repository](https://github.com/diegoeis/ghost-writer-manager-plugin)
-- [Report Issues](https://github.com/diegoeis/ghost-writer-manager-plugin/issues)
+- [GitHub Repository](https://github.com/firstpair/omnighost)
+- [Report Issues](https://github.com/firstpair/omnighost/issues)
 - [Ghost Documentation](https://ghost.org/docs/)
 - [Obsidian Plugin Development](https://docs.obsidian.md/Plugins/Getting+started/Build+a+plugin)
 
 ---
 
-**Full Changelog**: https://github.com/diegoeis/ghost-writer-manager-plugin/blob/main/CHANGELOG.md
+**Full Changelog**: https://github.com/firstpair/omnighost/blob/main/CHANGELOG.md

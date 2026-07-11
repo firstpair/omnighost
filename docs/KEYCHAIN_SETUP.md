@@ -126,4 +126,4 @@ If you manage multiple Ghost sites, you can create multiple secrets:
 
 ---
 
-**Need help?** Open an issue at: https://github.com/diegoeis/ghost-writer-manager-plugin/issues
+**Need help?** Open an issue at: https://github.com/firstpair/omnighost/issues

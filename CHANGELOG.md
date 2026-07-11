@@ -329,7 +329,7 @@ Renamed to **Omnighost** — a fork of [Ghost Writer Manager](https://github.com
 - No support for Ghost pages (posts only)
 - No media upload support yet
 
-[0.2.1]: https://github.com/diegoeis/ghost-writer-manager-plugin/compare/0.2.0...0.2.1
-[0.2.0]: https://github.com/diegoeis/ghost-writer-manager-plugin/compare/0.1.2...0.2.0
-[0.1.2]: https://github.com/diegoeis/ghost-writer-manager-plugin/compare/0.1.0...0.1.2
-[0.1.0]: https://github.com/diegoeis/ghost-writer-manager-plugin/releases/tag/0.1.0
+[0.2.1]: https://github.com/firstpair/omnighost/compare/0.2.0...0.2.1
+[0.2.0]: https://github.com/firstpair/omnighost/compare/0.1.2...0.2.0
+[0.1.2]: https://github.com/firstpair/omnighost/compare/0.1.0...0.1.2
+[0.1.0]: https://github.com/firstpair/omnighost/releases/tag/0.1.0
