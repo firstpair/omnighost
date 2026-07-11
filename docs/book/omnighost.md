@@ -4,11 +4,11 @@
 
 # Preface
 
-This is a short, friendly guide to **Obsidian** — a note-taking app you can run on your phone, your tablet, and your computer. It assumes **no prior knowledge**. If you have never heard of Obsidian, never written a note in “Markdown,” and are not sure what a “vault” is, you are in exactly the right place.
+This is a field guide to **Omnighost**, the First Pair Press bridge from Obsidian to Ghost. It still assumes **no prior knowledge**: if you have never heard of Obsidian, never written a note in “Markdown,” and are not sure what a “vault” is, you are in exactly the right place.
 
-The book is written with the **phone** in mind, because that is where a lot of real note-taking happens — on the train, in a queue, in bed at 1 a.m. when an idea won’t let you sleep. Everything here works on a desktop too, but the examples lean toward iOS and Android.
+The book is written with the **whole Obsidian loop** in mind: phone, tablet, laptop, desktop, and any synced vault that can run the plugin. First Pair Press uses that loop to draft anywhere and publish everywhere: a release note from an iPhone, a long essay from a Mac, an imported project announcement from a `.textpack`, or a photo-heavy post assembled inside a vault.
 
-The final chapter is a hands-on walkthrough of **Omnighost**, a plugin that turns notes you write in Obsidian into posts on a real website. The screenshots in that chapter are from a live phone, publishing to a real blog.
+Omnighost is now part of the First Pair Press publishing stack. It turns notes into live Ghost posts, keeps those posts linked to their source notes, uploads local images, imports packaged drafts with their assets, and fans the same message out through multiple blogs without losing track of which post lives where.
 
 A note on the pictures: the diagrams are drawn fresh for this book, and the phone screenshots are from the author’s own device. Where this book points you to features in detail, it links to the **official Obsidian documentation** at *help.obsidian.md* rather than copying it — that is always the most current source.
 
@@ -33,6 +33,8 @@ More precisely, Obsidian is an app for writing and connecting notes that are sto
 ![A vault is a folder containing Markdown notes, project folders, and images.](docs/book/diagrams/vault-structure.png)
 
 **3. Notes connect to each other.** The real magic is *linking*. Any note can point to any other note, and Obsidian remembers the connection in both directions. Over time your notes stop being a pile and start being a *web* — a personal Wikipedia where you are the only editor and the only reader.
+
+For First Pair Press, that same plain-file vault is also the press room. A book idea, release announcement, technical note, and public essay can start as ordinary Markdown, collect images beside it, move between devices, and become a web post only when it is ready. Omnighost adds the publishing rail without taking the vault away from Obsidian.
 
 <div id="ch003.xhtml_why-people-like-it" class="section level2">
 
@@ -334,9 +336,9 @@ Two pieces of advice regardless of method:
 
 <div id="ch011.xhtml_publishing-to-the-web-with-omnighost" class="section level1">
 
-# Publishing to the Web with Omnighost
+# Omnighost and the First Pair Press Web
 
-So far your notes have stayed private. This chapter is about the other direction: taking a note you wrote in Obsidian and **publishing it as a post on a real website** — and, crucially, **updating** that post later from the same note, without creating duplicates. The tool is a community plugin called **Omnighost**.
+So far your notes have stayed private. This chapter is about the other direction: taking a note you wrote in Obsidian and **publishing it as a post on a real website** — and, crucially, **updating** that post later from the same note, without creating duplicates. For First Pair Press, the tool is **Omnighost**: a practical web-publishing rail from any Obsidian platform to one Ghost blog or many.
 
 <div id="ch011.xhtml_what-is-ghost-and-what-does-the-plugin-do" class="section level2">
 
@@ -357,17 +359,39 @@ The flow is worth understanding because it explains the whole plugin:
 
 </div>
 
-<div id="ch011.xhtml_installing-it-on-a-phone" class="section level2">
+<div id="ch011.xhtml_what-omnighost-now-gives-the-press" class="section level2">
 
-## Installing it on a phone
+## What Omnighost now gives the press
 
-Omnighost is distributed as a community plugin. The easiest mobile route is the **BRAT** plugin mentioned earlier:
+The current Omnighost is no longer just a “send this note to Ghost” button. It is a full publishing manager for a small press that writes in public:
+
+- **Publish from any Obsidian platform.** Draft on desktop, revise on iPad, finish on iPhone, and sync from the same vault.
+- **Manage many Ghost blogs.** Add one blog per publication channel, each with its own site URL, Admin API key, folder, automatic sync setting, and interval.
+- **Choose one blog or many.** Use `g_blog`, the blog picker, or folder routing to decide whether a note goes to one site, several sites, or none.
+- **Update in place.** Omnighost stores per-blog Ghost ids and public URLs, so repeated syncs revise the live posts instead of making duplicates.
+- **Publish images.** Local Markdown images and Obsidian image embeds upload to Ghost, then the note is rewritten to use the hosted image URLs.
+- **Promote covers when needed.** The first body image can become the Ghost feature image and disappear from the body, which is useful for announcement cards.
+- **Avoid repeat image uploads.** Images are cached by content hash, so unchanged assets are reused on later syncs.
+- **Import textpacks.** A `.textpack` can carry Markdown, images, and Omnighost metadata into the vault as a sync-ready draft.
+- **Import or link existing Ghost posts.** A Ghost site can be pulled back into the vault, one post or one blog at a time, so Obsidian remains the editorial source.
+- **Clean up safely.** Bulk delete uses a checklist, optional per-post confirmation, and local archives; remote posts are never deleted silently.
+- **Plan the calendar.** The editorial calendar view shows published and scheduled posts for the month.
+
+That mix matters for First Pair Press because publishing is rarely one note to one site. A book release, a project milestone, or a manifesto may need a main press announcement, a project-specific post, a personal note, and a newsletter-oriented version. Omnighost keeps the source material in Obsidian and remembers every live destination.
+
+</div>
+
+<div id="ch011.xhtml_installing-it-on-any-obsidian-platform" class="section level2">
+
+## Installing it on any Obsidian platform
+
+Omnighost is distributed as a community plugin. The easiest route before community-directory release is the **BRAT** plugin mentioned earlier:
 
 1.  Install and enable **BRAT** from the community plugin directory.
-2.  Run the command **“BRAT: Add a beta plugin for testing”** and give it the plugin’s repository (e.g. `alexy/omnighost`).
+2.  Run the command **“BRAT: Add a beta plugin for testing”** and give it the plugin’s repository (e.g. `firstpair/omnighost`).
 3.  Enable **Omnighost** under **Settings → Community plugins**.
 
-(You can also install it by hand: copy the plugin’s `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/omnighost/` in your vault.)
+That works on desktop and mobile Obsidian. You can also install it by hand: copy the plugin’s `main.js`, `manifest.json`, and `styles.css` into `.obsidian/plugins/omnighost/` in your vault. Because the plugin lives inside the vault, the same First Pair Press vault can carry its publishing tools from Mac to iPad to iPhone.
 
 </div>
 
@@ -385,6 +409,8 @@ In **Settings → Omnighost**, the first section is **Ghost blogs**. Add one blo
 - an optional per-blog **Sync interval**.
 
 Tap **Save key** for each blog. Omnighost stores the key in Obsidian’s secure keychain and immediately tests the connection. A good connection greets you by the Ghost site’s name. If two blogs accidentally share the same keychain secret, settings warns you, because the wrong key will fail with a Ghost 401.
+
+For First Pair Press, think of each blog block as one public voice: the press site, a project site, a research notebook, a partner publication, or a newsletter-facing Ghost instance. Each one gets its own credentials and folder, but the writer stays in one Obsidian vault.
 
 </div>
 
@@ -427,13 +453,15 @@ Because the choices are dropdowns, you can’t accidentally enter an invalid val
 
 <div id="ch011.xhtml_a-first-publish-start-to-finish" class="section level2">
 
-## A first publish, start to finish
+## A first First Pair Press publish, start to finish
 
 1.  Write a note. Give it a real title — either a `# Heading` at the top or a sensible filename, because the title drives the post’s web address.
-2.  Open **Edit ghost properties**.
-3.  Set **Status** to *Publish now*, **Visibility** to *Public*.
-4.  Tap **Save & sync**.
-5.  Watch the status line flip to **Published** with a live link, and tap the copy button to grab the URL.
+2.  Add the images, diagrams, screenshots, or cover art that should travel with it.
+3.  Open **Edit ghost properties**.
+4.  Pick the target blog or blogs.
+5.  Set **Status** to *Publish now*, **Visibility** to *Public*.
+6.  Tap **Save & sync**.
+7.  Watch the status line flip to **Published** with a live link, and tap the copy button to grab the URL.
 
 Here’s the result on the open web — a note written on a phone, now a public post:
 
@@ -445,9 +473,9 @@ To **change** the post later, edit the note and **Save & sync** again. The plugi
 
 <div id="ch011.xhtml_publishing-to-more-than-one-blog" class="section level2">
 
-## Publishing to more than one blog
+## Spreading the word through multiple blogs
 
-Omnighost can manage several Ghost sites at once — handy if you run a personal blog and a work newsletter, or mirror the same writing to two places.
+Omnighost can manage several Ghost sites at once. For First Pair Press, this is the feature that turns a finished note into a real publicity surface.
 
 ![One note can route through Omnighost to several Ghost blogs, each with its own folder, key, and post identity.](docs/book/diagrams/multi-blog-routing.png)
 
@@ -461,6 +489,21 @@ The folders themselves also route. A note with no `g_blog` property publishes to
 
 Selective sync has two levels. For one note, set `g_no_sync: true` and Omnighost leaves it alone. For a whole blog folder, turn off **Auto-sync this folder** in that blog’s settings; manual sync still works when you ask for it.
 
+A typical First Pair Press announcement might start as one note:
+
+```yaml
+---
+g_blog: ["firstpair.press", "chief.sc", "collected.ga"]
+g_slug: "omnighost-first-pair-press"
+g_tags: [first-pair-press, omnighost, publishing]
+g_excerpt: "Omnighost turns an Obsidian vault into the web publishing rail for First Pair Press."
+g_cover_from_first_image: true
+g_published: true
+---
+```
+
+On sync, Omnighost creates or updates one Ghost post per blog and writes back separate identity keys for each target. That means the press can spread the same news across several audiences while preserving one source note and one edit loop. If the subtitle changes, the image needs a better caption, or a date moves, a second sync updates every linked post in place.
+
 To bring an existing site into Obsidian, run **“Import all posts from a ghost blog,”** choose one or more blogs, and every post arrives as a note in that blog’s folder, already tagged with its `g_blog` and per-blog id/URL keys. To import one post, use **Import post from ghost** with the Ghost editor URL. To connect an existing note to an existing Ghost post, use **Link note to ghost post** and choose whether Ghost overwrites the note or the note syncs up to Ghost.
 
 One thing to know: a note’s identity on each blog is its stored id, with the slug as the fallback before the first id is written. Keep slugs stable once a note is published widely. If you remove a blog from `g_blog` after the note has already published there, the next interactive sync warns about the orphaned Ghost post. You can delete it on Ghost, keep it by re-adding that blog, or decide later.
@@ -471,7 +514,7 @@ One thing to know: a note’s identity on each blog is its stored id, with the s
 
 ## Importing textpacks
 
-A **textpack** is a small zip that bundles a Markdown post together with its images — the format writing apps like Ulysses use to move documents between devices. Omnighost imports textpacks directly, which makes it the last mile for drafts prepared elsewhere: a post written on a laptop, rendered diagrams and screenshots included, travels to your phone as one file and leaves it as a published post.
+A **textpack** is a small zip that bundles a Markdown post together with its images — the format writing apps like Ulysses use to move documents between devices. Omnighost imports textpacks directly, which makes it the last mile for drafts prepared elsewhere: a post written in a project repo, exported from a book pipeline, or polished in another writing app travels to your phone as one file and leaves it as a publishable First Pair Press draft.
 
 There are two ways in:
 
@@ -480,7 +523,9 @@ There are two ways in:
 
 Either way the result is the same: the note lands in the blog’s folder with its Ghost properties already set, and its images are placed under `assets/<slug>/` next to it — they upload to Ghost automatically on the first sync, like any other local image. The note arrives as a *draft*, so nothing is published until you decide.
 
-A pack can also carry its own publishing instructions — blog, slug, tags, excerpt — embedded in the bundle’s metadata. Packs prepared with the companion `textpack.py` script (in the plugin repository, for building packs from a project’s blog posts) target the right blog by themselves: save the file, open Obsidian, sync, done.
+A pack can also carry its own publishing instructions — blog, slug, title, tags, excerpt — embedded in the bundle’s `info.json` under Omnighost metadata. Packs prepared with the companion `textpack.py` script target the right blog by themselves: save the file, open Obsidian, review the draft, sync, done.
+
+This is how First Pair Press can connect repo-native writing to mobile publishing. A project can build a textpack with rendered diagrams, screenshots, and metadata; iCloud or another sync path drops it into the vault; Omnighost imports it; the editor checks the note on whichever Obsidian device is in hand; and the same note can then publish to the press blog, the project blog, or both.
 
 </div>
 
@@ -525,7 +570,7 @@ A few common cases and what they mean:
 
 ## Why updating is the whole point
 
-Plenty of tools can *post* from a note. The hard part — and the reason this plugin exists — is *re-posting the same note without making a mess*. Omnighost keeps a stable link between one note and each of its Ghost posts: edit the note, sync, and the live posts change in place. Your Obsidian vault stays the single source of truth, and the web stays in step with it.
+Plenty of tools can *post* from a note. The hard part — and the reason this plugin exists — is *re-posting the same note without making a mess*, especially when the same announcement appears on several blogs. Omnighost keeps a stable link between one note and each of its Ghost posts: edit the note, sync, and the live posts change in place. The First Pair Press vault stays the single source of truth, and the web stays in step with it.
 
 </div>
 
@@ -537,16 +582,17 @@ Plenty of tools can *post* from a note. The hard part — and the reason this pl
 
 # Where to Go Next
 
-You now have the whole loop: capture ideas as notes, connect them with links, organize lightly with folders, tags, and properties, find anything in a tap, extend the app with plugins, sync across your devices, and — when a note is ready for the world — publish it to a Ghost site and keep it updated.
+You now have the whole loop: capture ideas as notes, connect them with links, organize lightly with folders, tags, and properties, find anything in a tap, extend the app with plugins, sync across your devices, and — when a note is ready for the world — publish it through Omnighost to the First Pair Press web.
 
 A few directions from here:
 
 - **Lean on the official docs.** The most current, detailed reference is at *help.obsidian.md*, with developer material at *docs.obsidian.md*. When a menu or setting looks different from this book, trust the docs — apps move fast.
-- **Try the community.** Obsidian has an active forum and Discord where people share workflows and plugins.
-- **Start a daily note.** The single habit that makes Obsidian “click” for most people is writing one note per day and linking out from it.
+- **Build the press blogs deliberately.** Add one Ghost blog at a time, test its key, give it a clear folder, and publish one safe draft before turning on periodic sync.
+- **Package announcements as textpacks.** For repo-driven projects, make the `.textpack` the handoff format so Markdown, images, and Omnighost metadata travel together.
+- **Use multi-blog publishing when the audience overlaps.** A release can reach the press site, a project blog, and a personal channel from one source note.
 - **Back up.** Your notes are plain files; treat them as precious and copy them somewhere safe.
 
-Most of all: don’t over-engineer it. The best note system is the one you actually use. Open the app, tap **+**, and write the next thing down.
+Most of all: keep the loop alive. Write in Obsidian, review the properties, sync through Omnighost, then keep improving the source note as the public story evolves.
 
 </div>
 

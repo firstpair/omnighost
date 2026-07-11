@@ -1,0 +1,56 @@
+{
+  "$schema": "../firstpair/publishing/book.build.schema.json",
+  "schemaVersion": 1,
+  "bookRoot": "docs/book",
+  "manuscript": "docs/book/omnighost.md",
+  "metadata": "docs/book/metadata.yaml",
+  "cover": "docs/book/cover.md",
+  "css": "docs/book/epub.css",
+  "stem": "omnighost",
+  "title": "Omnighost for First Pair Press",
+  "subtitle": "Publishing from Obsidian to Ghost Across Every Blog",
+  "author": "Alexy Khrabrov",
+  "version": {
+    "source": "package",
+    "file": "package.json"
+  },
+  "kindleName": "${stem} (${version})",
+  "dist": "docs/book/dist",
+  "buildDir": "docs/book/build/firstpair",
+  "edition": "full",
+  "primaryFormat": "typst",
+  "mobi": true,
+  "pandoc": {
+    "reader": "markdown+smart",
+    "tocDepth": 2,
+    "numberSections": true,
+    "resourcePaths": ["docs/book", "${repoRoot}"]
+  },
+  "pdfFormats": [
+    {
+      "name": "typst",
+      "renderer": "typst",
+      "stem": "omnighost",
+      "primary": true
+    },
+    {
+      "name": "troff",
+      "renderer": "neatroff",
+      "stem": "omnighost-troff",
+      "source": "docs/book/build/firstpair/omnighost.tr"
+    }
+  ],
+  "html": {
+    "splitLevel": 1
+  },
+  "hooks": {
+    "prepare": [
+      "docs/book/render-diagrams.sh",
+      "docs/book/prepare-neatroff.sh"
+    ],
+    "postEpub": "docs/book/fix_epub_layout.sh \"${epub}\" \"${kindleName}\""
+  },
+  "validators": [
+    "docs/book/check_epub_metadata.sh \"${distDir}/${stem}.epub\" \"${kindleName}\""
+  ]
+}

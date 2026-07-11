@@ -8,6 +8,11 @@ release/
 dist-ios/
 docs/book/dist/* (*).epub
 docs/book/dist/* (*).pdf
+docs/book/dist/* (*).html
+docs/book/dist/* (*)-chapters
+docs/book/build/firstpair/
+docs/book/dist/omnighost-typst.*
+docs/book/dist/omnighost-troff.epub
 
 # obsidian
 data.json

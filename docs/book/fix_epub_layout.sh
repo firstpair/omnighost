@@ -8,8 +8,8 @@ fi
 
 epub="$1"
 library_title="${2:-}"
-visible_title="Obsidian on the Go"
-cover_id="obsidian-on-the-go"
+visible_title="Omnighost for First Pair Press"
+cover_id="omnighost-for-first-pair-press"
 
 if [[ ! -f "$epub" ]]; then
   echo "EPUB not found: $epub" >&2
