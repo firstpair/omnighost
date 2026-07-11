@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en-US" xml:lang="en-US">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <meta name="author" content="Alexy Khrabrov" />
+  <meta name="dcterms.date" content="2026-07-11" />
+  <title>Omnighost for First Pair Press</title>
+  <style>
+    div.sitenav { display: flex; flex-direction: row; flex-wrap: wrap; }
+    span.navlink { flex: 1; }
+    span.navlink-label { display: inline-block; min-width: 4em; }
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <link rel="stylesheet" href="book.css" />
+</head>
+<body>
+<nav id="sitenav">
+<div class="sitenav">
+<span class="navlink">
+<span class="navlink-label">Up:</span> <a href="index.html" accesskey="u" rel="up">Omnighost for First Pair Press</a>
+</span>
+<span class="navlink">
+<span class="navlink-label">Top:</span> <a href="index.html" accesskey="t" rel="top">Omnighost for First Pair Press</a>
+</span>
+</div>
+<div class="sitenav">
+<span class="navlink">
+</span>
+<span class="navlink">
+<span class="navlink-label">Previous:</span> <a href="index.html" accesskey="p" rel="previous">Omnighost for First Pair Press</a>
+</span>
+</div>
+</nav>
+<section epub:type="titlepage" style="text-align: center; page-break-after: always; padding-top: 8em;">
+  <h1 style="font-size: 2.55em; margin: 0 0 0.35em; text-align: center; page-break-before: auto;">Omnighost for First Pair Press</h1>
+  <p style="font-size: 1.2em; margin: 0 0 0.3em;">Publishing from Obsidian to Ghost</p>
+  <p style="font-size: 1.05em; margin: 0 0 4em;">Across Every Blog</p>
+  <p style="font-size: 1.2em; margin: 0.2em 0;">Alexy Khrabrov</p>
+  <p style="font-size: 0.85em; margin: 1.5em 0 0;">omnighost (0.12.9)</p>
+</section>
+<p><span id="ch002.xhtml"></span></p>
+<section id="ch002.xhtml_preface" class="level1">
+<h1 data-number="1" id="preface"><span
+class="header-section-number">1</span> Preface</h1>
+<p>This is a field guide to <strong>Omnighost</strong>, the First Pair
+Press bridge from Obsidian to Ghost. It still assumes <strong>no prior
+knowledge</strong>: if you have never heard of Obsidian, never written a
+note in “Markdown,” and are not sure what a “vault” is, you are in
+exactly the right place.</p>
+<p>The book is written with the <strong>whole Obsidian loop</strong> in
+mind: phone, tablet, laptop, desktop, and any synced vault that can run
+the plugin. First Pair Press uses that loop to draft anywhere and
+publish everywhere: a release note from an iPhone, a long essay from a
+Mac, an imported project announcement from a <code>.textpack</code>, or
+a photo-heavy post assembled inside a vault.</p>
+<p>Omnighost is now part of the First Pair Press publishing stack. It
+turns notes into live Ghost posts, keeps those posts linked to their
+source notes, uploads local images, imports packaged drafts with their
+assets, and fans the same message out through multiple blogs without
+losing track of which post lives where.</p>
+<p>A note on the pictures: the diagrams are drawn fresh for this book,
+and the phone screenshots are from the author’s own device. Where this
+book points you to features in detail, it links to the <strong>official
+Obsidian documentation</strong> at <em>help.obsidian.md</em> rather than
+copying it — that is always the most current source.</p>
+<p>Let’s begin.</p>
+</section>
+<p><span id="ch003.xhtml"></span></p>
+<section id="ch003.xhtml_what-is-obsidian" class="level1">
+<h1 data-number="2" id="what-is-obsidian"><span
+class="header-section-number">2</span> What Is Obsidian?</h1>
+<p>Imagine a drawer full of plain text files — one per idea, project,
+person, or day. Now imagine that drawer is searchable in an instant,
+that any note can <em>link</em> to any other note, and that the whole
+thing lives on your own device instead of someone else’s server. That,
+in one sentence, is Obsidian.</p>
+<p>More precisely, Obsidian is an app for writing and connecting notes
+that are stored as <strong>ordinary files on your device</strong>. Three
+ideas make it tick.</p>
+<p><strong>1. Your notes are plain files.</strong> Each note is a normal
+text file with a <code>.md</code> extension (more on <code>.md</code> in
+a moment). You can open them in any other program, back them up like any
+other file, and read them in fifty years without needing Obsidian at
+all. Nothing is locked inside a proprietary database.</p>
+<p><strong>2. Your notes live in a “vault.”</strong> A <em>vault</em> is
+just a folder on your device that Obsidian watches. Everything in that
+folder — notes, images, sub-folders — is your vault. You can have one
+vault for everything, or several (work, personal, a journal). A vault is
+portable: copy the folder, and you’ve copied your whole knowledge
+base.</p>
+<figure>
+<img src="docs/book/diagrams/vault-structure.png"
+alt="A vault is a folder containing Markdown notes, project folders, and images." />
+<figcaption aria-hidden="true">A vault is a folder containing Markdown
+notes, project folders, and images.</figcaption>
+</figure>
+<p><strong>3. Notes connect to each other.</strong> The real magic is
+<em>linking</em>. Any note can point to any other note, and Obsidian
+remembers the connection in both directions. Over time your notes stop
+being a pile and start being a <em>web</em> — a personal Wikipedia where
+you are the only editor and the only reader.</p>
+<p>For First Pair Press, that same plain-file vault is also the press
+room. A book idea, release announcement, technical note, and public
+essay can start as ordinary Markdown, collect images beside it, move
+between devices, and become a web post only when it is ready. Omnighost
+adds the publishing rail without taking the vault away from
+Obsidian.</p>
+<section id="ch003.xhtml_why-people-like-it" class="level2">
+<h2 data-number="2.1" id="why-people-like-it"><span
+class="header-section-number">2.1</span> Why people like it</h2>
+<ul>
+<li><strong>Local and private.</strong> By default your notes never
+leave your device unless you choose to sync or publish them.</li>
+<li><strong>It outlives the app.</strong> Plain Markdown files are about
+as future-proof as a digital format gets.</li>
+<li><strong>It grows with you.</strong> Start with a grocery list; end
+with a research system. The app doesn’t force a structure on you.</li>
+<li><strong>It’s extensible.</strong> A large community builds
+<em>plugins</em> that add features — including the one in the last
+chapter of this book.</li>
+</ul>
+</section>
+<section id="ch003.xhtml_what-markdown-is-the-90-second-version"
+class="level2">
+<h2 data-number="2.2" id="what-markdown-is-the-90-second-version"><span
+class="header-section-number">2.2</span> What Markdown is (the 90-second
+version)</h2>
+<p>Markdown is a way of writing formatted text using plain characters.
+Instead of clicking a “bold” button, you wrap a word in asterisks.
+Instead of a heading style, you start a line with <code>#</code>. It
+looks like this:</p>
+<pre class="text"><code># A heading
+
+This is a paragraph with a **bold** word and an *italic* one.
+
+- a bullet
+- another bullet
+
+&gt; a quoted line</code></pre>
+<p>You don’t have to memorize it — Obsidian shows you the formatted
+result as you type, and there is a one-page cheat sheet at the back of
+this book. The point is that the formatting is <em>part of the
+text</em>, so your notes stay readable anywhere.</p>
+</section>
+</section>
+<p><span id="ch004.xhtml"></span></p>
+<section id="ch004.xhtml_getting-started-on-your-phone" class="level1">
+<h1 data-number="3" id="getting-started-on-your-phone"><span
+class="header-section-number">3</span> Getting Started on Your
+Phone</h1>
+<p>Obsidian is free to download. The fastest path on a phone:</p>
+<ol type="1">
+<li>Open the <strong>App Store</strong> (iPhone/iPad) or <strong>Google
+Play</strong> (Android) and search for <strong>Obsidian</strong>.
+Install it.</li>
+<li>Open the app. The first time, it offers to <strong>create a
+vault</strong> or open an existing one. Choose <strong>Create new
+vault</strong>, give it a name (e.g. <em>Notes</em>), and pick where it
+lives.</li>
+<li>On iPhone you’ll typically choose between storing the vault
+<strong>on your device</strong> or <strong>in iCloud Drive</strong>
+(handy if you also use a Mac). On Android you pick a folder. Either is
+fine to start; you can move it later.</li>
+<li>Tap the <strong>+</strong> (new note), type something, and you’ve
+made your first note.</li>
+</ol>
+<p>That’s genuinely it — you now have a working second brain in your
+pocket.</p>
+<section id="ch004.xhtml_a-quick-tour-of-the-screen" class="level2">
+<h2 data-number="3.1" id="a-quick-tour-of-the-screen"><span
+class="header-section-number">3.1</span> A quick tour of the screen</h2>
+<p>On a phone the interface is deliberately spare. A few things to
+find:</p>
+<ul>
+<li>The <strong>note area</strong> in the middle, where you read and
+write.</li>
+<li>A <strong>left sidebar</strong> (swipe from the left edge, or tap
+the menu icon) with your <strong>file list</strong> and
+<strong>search</strong>.</li>
+<li>A <strong>right sidebar</strong> (swipe from the right) with extras
+like <strong>backlinks</strong> and the <strong>outline</strong>.</li>
+<li>A <strong>command palette</strong> — a searchable list of
+<em>everything</em> the app can do. You’ll use this constantly; we’ll
+meet it properly in Chapter 6.</li>
+<li>A <strong>ribbon</strong> of icons for common actions and for
+plugins.</li>
+</ul>
+<p>If you ever feel lost, remember two gestures: <strong>swipe from the
+left</strong> for your files, and open the <strong>command
+palette</strong> to search for any action by name.</p>
+</section>
+<section id="ch004.xhtml_on-editing-modes" class="level2">
+<h2 data-number="3.2" id="on-editing-modes"><span
+class="header-section-number">3.2</span> On editing modes</h2>
+<p>Obsidian can show a note two ways. <strong>Live Preview</strong>
+formats text as you write (bold looks bold). <strong>Source
+mode</strong> shows the raw Markdown characters. Beginners usually live
+in Live Preview; switch to Source when you want to see exactly what’s in
+the file. You can toggle between them from the command palette or the
+note’s “more options” menu.</p>
+</section>
+</section>
+<p><span id="ch005.xhtml"></span></p>
+<section id="ch005.xhtml_writing-in-markdown" class="level1">
+<h1 data-number="4" id="writing-in-markdown"><span
+class="header-section-number">4</span> Writing in Markdown</h1>
+<p>You already saw the basics. Here is the working set you’ll use 95% of
+the time.</p>
+<p><strong>Headings</strong> structure a note. One <code>#</code> is the
+biggest; more <code>#</code> make smaller sub-headings.</p>
+<pre class="text"><code># Title
+## Section
+### Sub-section</code></pre>
+<p><strong>Emphasis</strong>:</p>
+<pre class="text"><code>*italic*  or  _italic_
+**bold**  or  __bold__
+~~strikethrough~~</code></pre>
+<p><strong>Lists</strong> — bullets with <code>-</code>, numbers with
+<code>1.</code>:</p>
+<pre class="text"><code>- milk
+- eggs
+
+1. wake up
+2. coffee</code></pre>
+<p><strong>Checkboxes</strong> turn a list into a to-do list. Tap a box
+in Live Preview to check it off:</p>
+<pre class="text"><code>- [ ] write a note
+- [x] install Obsidian</code></pre>
+<p><strong>Quotes</strong> and <strong>code</strong>:</p>
+<pre class="text"><code>&gt; A quoted thought.
+
+Inline `code` for a command. For several lines of code or commands, fence them with three backticks on their own lines, above and below.</code></pre>
+<p><strong>Images</strong> can be dropped or pasted into a note;
+Obsidian stores the file in your vault and writes a link to it for
+you.</p>
+<p>The golden rule: when in doubt, just <em>type</em>. Markdown is
+forgiving, and anything it doesn’t recognize is simply shown as plain
+text.</p>
+</section>
+<p><span id="ch006.xhtml"></span></p>
+<section id="ch006.xhtml_linking-your-thoughts" class="level1">
+<h1 data-number="5" id="linking-your-thoughts"><span
+class="header-section-number">5</span> Linking Your Thoughts</h1>
+<p>This is the chapter that turns a notes app into
+<em>Obsidian</em>.</p>
+<p>To link from one note to another, type two square brackets and start
+typing a name:</p>
+<pre class="text"><code>See also [[Books to read]] and [[Garden]].</code></pre>
+<p>As you type inside the brackets, Obsidian suggests matching notes.
+Pick one and you’ve made a link. Tap the link later to jump there. If
+the target note doesn’t exist yet, the link is created “empty” — tap it
+and Obsidian makes the note for you. This is a lovely way to write:
+mention an idea now, flesh it out later.</p>
+<section id="ch006.xhtml_backlinks-connections-in-reverse"
+class="level2">
+<h2 data-number="5.1" id="backlinks-connections-in-reverse"><span
+class="header-section-number">5.1</span> Backlinks: connections in
+reverse</h2>
+<p>Here’s the part that feels like magic. If note A links to note B,
+then note B automatically knows that A points at it. Open B, look at its
+<strong>Backlinks</strong> panel, and you’ll see every note that
+mentions it — without you ever editing B.</p>
+<figure>
+<img src="docs/book/diagrams/backlinks.png"
+alt="Backlinks show which notes point at the current note." />
+<figcaption aria-hidden="true">Backlinks show which notes point at the
+current note.</figcaption>
+</figure>
+<p>Backlinks mean you never lose a thought. Write about your garden in
+today’s journal, and the <em>Garden</em> note quietly collects every
+mention over the months.</p>
+</section>
+<section id="ch006.xhtml_the-graph" class="level2">
+<h2 data-number="5.2" id="the-graph"><span
+class="header-section-number">5.2</span> The graph</h2>
+<p>Obsidian can draw your whole vault as a <strong>graph</strong>: each
+note is a dot, each link a line. Early on it’s a few scattered dots.
+After a few hundred notes it becomes a constellation, and clusters
+appear where your real interests live. The graph is more fun than useful
+at first — but it’s a great way to <em>see</em> your thinking take
+shape.</p>
+</section>
+<section id="ch006.xhtml_tags" class="level2">
+<h2 data-number="5.3" id="tags"><span
+class="header-section-number">5.3</span> Tags</h2>
+<p>Sometimes you don’t want a whole note for a topic — you just want a
+label. Type a <code>#</code> followed by a word, with no space:</p>
+<pre class="text"><code>Had a great idea on the bus today. #ideas #commute</code></pre>
+<p>Tags are searchable and clickable. They’re a lighter-weight cousin of
+links: links connect specific notes; tags gather many notes under a
+theme.</p>
+</section>
+</section>
+<p><span id="ch007.xhtml"></span></p>
+<section id="ch007.xhtml_organizing-a-vault" class="level1">
+<h1 data-number="6" id="organizing-a-vault"><span
+class="header-section-number">6</span> Organizing a Vault</h1>
+<p>There is no single “right” way to organize Obsidian, which is
+liberating and, at first, slightly terrifying. Three tools help, and you
+can mix them freely.</p>
+<p><strong>Folders</strong> work exactly as you’d expect — drag notes
+into them, nest them. Good for coarse separation (Work, Personal,
+Journal). Don’t over-think folders; linking and search make deep
+hierarchies unnecessary.</p>
+<p><strong>Tags</strong> (from the last chapter) cut <em>across</em>
+folders. A note in <code>Work/</code> can carry <code>#idea</code> right
+alongside a note in <code>Personal/</code>.</p>
+<p><strong>Properties</strong> are the most powerful and the least
+obvious, so they get their own section.</p>
+<section id="ch007.xhtml_properties-the-notes-data" class="level2">
+<h2 data-number="6.1" id="properties-the-notes-data"><span
+class="header-section-number">6.1</span> Properties (the note’s
+“data”)</h2>
+<p>Every note can carry a small block of structured information at the
+very top, called <strong>properties</strong> (the underlying format is
+called <em>YAML frontmatter</em>). It’s fenced by three dashes:</p>
+<pre class="text"><code>---
+title: Trip to Los Cabos
+status: draft
+tags: [travel, 2026]
+rating: 5
+---
+
+The body of the note starts here.</code></pre>
+<p>Each line is a <strong>key</strong> and a <strong>value</strong>.
+Obsidian shows these as a tidy <strong>Properties panel</strong> at the
+top of the note, with the right input for each type — a checkbox for
+yes/no, a date picker for dates, a list editor for lists.</p>
+<figure>
+<img src="docs/book/media/file2.png"
+alt="A note’s Properties panel on a phone. The keys on the left (here prefixed ghost_) each have an editor on the right — text, checkboxes, and lists. Long key names are truncated; tap one to see it in full." />
+<figcaption aria-hidden="true">A note’s Properties panel on a phone. The
+keys on the left (here prefixed <code>ghost_</code>) each have an editor
+on the right — text, checkboxes, and lists. Long key names are
+truncated; tap one to see it in full.</figcaption>
+</figure>
+<p>Why bother? Because properties make notes <em>queryable and
+automatable</em>. Plugins read them, dashboards filter on them, and — as
+you’ll see in the final chapter — a publishing plugin uses them to
+decide a post’s title, visibility, and schedule. For now, just know that
+the block at the top of a note is where the <em>structured</em>
+information lives, separate from the prose below it.</p>
+</section>
+</section>
+<p><span id="ch008.xhtml"></span></p>
+<section id="ch008.xhtml_finding-things" class="level1">
+<h1 data-number="7" id="finding-things"><span
+class="header-section-number">7</span> Finding Things</h1>
+<p>A vault is only as good as your ability to get back to a note.
+Obsidian gives you three fast paths, and all three are reachable from
+the phone.</p>
+<p><strong>Search</strong> (the magnifying glass in the left sidebar)
+looks through the full text of every note. It supports quoted phrases
+and simple operators, but plain words get you a long way.</p>
+<p><strong>Quick Switcher</strong> jumps to a note by name. Open the
+command palette and run “Quick switcher,” type a few letters of a note’s
+title, and hit it. This is the single fastest way to navigate once you
+know roughly what you’re looking for.</p>
+<p><strong>Command Palette</strong> is the master key. It’s a searchable
+list of <em>every</em> command in the app and its plugins — “Toggle Live
+Preview,” “Open graph view,” “Create new note,” and hundreds more. You
+don’t need to memorize menus; you just remember a word or two and
+search. On a phone it’s usually a toolbar icon or a swipe-down; bind it
+to something comfortable and use it for everything.</p>
+<blockquote>
+<p>Tip: most actions you’ll read about in this book — including the
+Omnighost commands later — are run from the command palette by typing
+part of their name.</p>
+</blockquote>
+</section>
+<p><span id="ch009.xhtml"></span></p>
+<section id="ch009.xhtml_making-obsidian-yours-plugins" class="level1">
+<h1 data-number="8" id="making-obsidian-yours-plugins"><span
+class="header-section-number">8</span> Making Obsidian Yours:
+Plugins</h1>
+<p>Out of the box, Obsidian is intentionally modest. Its power comes
+from <strong>plugins</strong>, and there are two kinds.</p>
+<p><img src="docs/book/media/file3.png" /></p>
+<p><strong>Core plugins</strong> are made by the Obsidian team and ship
+with the app. They’re just toggled on or off in <strong>Settings → Core
+plugins</strong>. Many features you’ve already met — Backlinks, Graph
+view, Daily notes, Templates, Outline — are core plugins. If something
+seems missing, check here first; it may simply be switched off.</p>
+<p><strong>Community plugins</strong> are built by other people and
+published to an in-app directory. They unlock workflows the core app
+never tries to cover: calendars, task boards, spaced-repetition
+flashcards, and the Ghost publishing plugin in the next chapter.</p>
+<section id="ch009.xhtml_turning-on-community-plugins-safely"
+class="level2">
+<h2 data-number="8.1" id="turning-on-community-plugins-safely"><span
+class="header-section-number">8.1</span> Turning on community plugins
+safely</h2>
+<p>The first time you want a community plugin, Obsidian asks you to
+acknowledge that these are third-party add-ons (sensible — they run real
+code). Once you’ve turned the feature on, you can
+<strong>Browse</strong> the directory, install a plugin, and
+<strong>enable</strong> it. Each plugin lives in your vault under a
+hidden <code>.obsidian/plugins/</code> folder, so it travels with the
+vault.</p>
+<p>A few habits keep this pleasant:</p>
+<ul>
+<li><strong>Install what you’ll use</strong>, not everything that looks
+interesting.</li>
+<li><strong>Read the plugin’s page</strong> for what permissions or
+setup it needs.</li>
+<li><strong>Update occasionally</strong> — plugins improve, and updates
+are one tap.</li>
+</ul>
+<p>There’s also a popular community plugin called <strong>BRAT</strong>
+that installs and auto-updates plugins straight from a GitHub
+repository. It’s the easiest way to run a plugin that isn’t (yet) in the
+official directory — which is exactly how you’ll install Omnighost on a
+phone in the final chapter.</p>
+</section>
+</section>
+<p><span id="ch010.xhtml"></span></p>
+<section id="ch010.xhtml_syncing-across-devices" class="level1">
+<h1 data-number="9" id="syncing-across-devices"><span
+class="header-section-number">9</span> Syncing Across Devices</h1>
+<p>Most people want the same notes on their phone and their computer.
+Because a vault is just a folder, you have several ways to keep it in
+step.</p>
+<p><img src="docs/book/media/file4.png" /></p>
+<p><strong>Obsidian Sync</strong> is the official, paid service. It’s
+the most reliable option, encrypts your notes end-to-end, handles
+conflicts gracefully, and works across every platform with no fiddling.
+If syncing matters to you, it’s the least painful choice.</p>
+<p><strong>iCloud Drive</strong> (Apple devices) is free and built in:
+put the vault in iCloud and your iPhone, iPad, and Mac share it. It
+works well for one person on Apple gear, though it can be slower to
+settle than Sync and is less forgiving if two devices edit the same note
+at the same moment.</p>
+<p><strong>Other options</strong> exist — third-party cloud drives, or
+<strong>Git</strong> for the technically inclined (which also gives you
+a full history). These are more setup but more control.</p>
+<p>Two pieces of advice regardless of method:</p>
+<ul>
+<li><strong>Pick one sync method</strong> and stick with it. Layering
+two (say iCloud <em>and</em> Sync) is how conflicts are born.</li>
+<li><strong>Keep a backup.</strong> Sync is not a backup — it faithfully
+copies your mistakes too. Because your vault is plain files, any normal
+backup works.</li>
+</ul>
+</section>
+<p><span id="ch011.xhtml"></span></p>
+<section id="ch011.xhtml_publishing-to-the-web-with-omnighost"
+class="level1">
+<h1 data-number="10" id="omnighost-and-the-first-pair-press-web"><span
+class="header-section-number">10</span> Omnighost and the First Pair
+Press Web</h1>
+<p>So far your notes have stayed private. This chapter is about the
+other direction: taking a note you wrote in Obsidian and
+<strong>publishing it as a post on a real website</strong> — and,
+crucially, <strong>updating</strong> that post later from the same note,
+without creating duplicates. For First Pair Press, the tool is
+<strong>Omnighost</strong>: a practical web-publishing rail from any
+Obsidian platform to one Ghost blog or many.</p>
+<section id="ch011.xhtml_what-is-ghost-and-what-does-the-plugin-do"
+class="level2">
+<h2 data-number="10.1"
+id="what-is-ghost-and-what-does-the-plugin-do"><span
+class="header-section-number">10.1</span> What is Ghost, and what does
+the plugin do?</h2>
+<p><strong>Ghost</strong> is a popular publishing platform — think of it
+as software that runs a blog or newsletter, like a leaner, modern
+WordPress. A Ghost site has <em>posts</em>, each with a title, body,
+tags, an excerpt, a visibility setting (public or members-only), and a
+publish date.</p>
+<p><strong>Omnighost</strong> connects your Obsidian vault to one or
+more Ghost sites. You write in Obsidian as usual; the plugin pushes the
+note to Ghost as a post. Publish the same note again and it <em>updates
+the existing post in place</em> rather than spawning a copy. If you run
+several blogs, one note can publish to one site, several sites, or stay
+out of sync entirely.</p>
+<figure>
+<img src="docs/book/diagrams/omnighost-flow.png"
+alt="Omnighost reads an Obsidian note and local images, creates or updates the Ghost post, and writes post identifiers back to the note." />
+<figcaption aria-hidden="true">Omnighost reads an Obsidian note and
+local images, creates or updates the Ghost post, and writes post
+identifiers back to the note.</figcaption>
+</figure>
+<p>The flow is worth understanding because it explains the whole
+plugin:</p>
+<ol type="1">
+<li>The note’s <strong>properties</strong> (a set of keys, by convention
+prefixed <code>ghost_</code> or <code>g_</code>) tell Omnighost which
+blog(s) to target, whether the post is a draft or published, who can
+read it, when it should go live, and which tags/images to use.</li>
+<li>On the <strong>first publish</strong>, the plugin creates the post
+and writes that blog’s <strong>id</strong>, Ghost editor URL, and public
+URL back into the note’s properties.</li>
+<li>On <strong>later syncs</strong>, it reads those stored ids and
+updates the exact same Ghost posts. In multi-blog notes, each target
+blog gets its own id and URL keys.</li>
+<li>Any <strong>local images</strong> in the note are uploaded to Ghost
+and the links rewritten, so pictures actually appear on the web.</li>
+</ol>
+</section>
+<section id="ch011.xhtml_what-omnighost-now-gives-the-press"
+class="level2">
+<h2 data-number="10.2" id="what-omnighost-now-gives-the-press"><span
+class="header-section-number">10.2</span> What Omnighost now gives the
+press</h2>
+<p>The current Omnighost is no longer just a “send this note to Ghost”
+button. It is a full publishing manager for a small press that writes in
+public:</p>
+<ul>
+<li><strong>Publish from any Obsidian platform.</strong> Draft on
+desktop, revise on iPad, finish on iPhone, and sync from the same
+vault.</li>
+<li><strong>Manage many Ghost blogs.</strong> Add one blog per
+publication channel, each with its own site URL, Admin API key, folder,
+automatic sync setting, and interval.</li>
+<li><strong>Choose one blog or many.</strong> Use <code>g_blog</code>,
+the blog picker, or folder routing to decide whether a note goes to one
+site, several sites, or none.</li>
+<li><strong>Update in place.</strong> Omnighost stores per-blog Ghost
+ids and public URLs, so repeated syncs revise the live posts instead of
+making duplicates.</li>
+<li><strong>Publish images.</strong> Local Markdown images and Obsidian
+image embeds upload to Ghost, then the note is rewritten to use the
+hosted image URLs.</li>
+<li><strong>Promote covers when needed.</strong> The first body image
+can become the Ghost feature image and disappear from the body, which is
+useful for announcement cards.</li>
+<li><strong>Avoid repeat image uploads.</strong> Images are cached by
+content hash, so unchanged assets are reused on later syncs.</li>
+<li><strong>Import textpacks.</strong> A <code>.textpack</code> can
+carry Markdown, images, and Omnighost metadata into the vault as a
+sync-ready draft.</li>
+<li><strong>Import or link existing Ghost posts.</strong> A Ghost site
+can be pulled back into the vault, one post or one blog at a time, so
+Obsidian remains the editorial source.</li>
+<li><strong>Clean up safely.</strong> Bulk delete uses a checklist,
+optional per-post confirmation, and local archives; remote posts are
+never deleted silently.</li>
+<li><strong>Plan the calendar.</strong> The editorial calendar view
+shows published and scheduled posts for the month.</li>
+</ul>
+<p>That mix matters for First Pair Press because publishing is rarely
+one note to one site. A book release, a project milestone, or a
+manifesto may need a main press announcement, a project-specific post, a
+personal note, and a newsletter-oriented version. Omnighost keeps the
+source material in Obsidian and remembers every live destination.</p>
+</section>
+<section id="ch011.xhtml_installing-it-on-any-obsidian-platform"
+class="level2">
+<h2 data-number="10.3" id="installing-it-on-any-obsidian-platform"><span
+class="header-section-number">10.3</span> Installing it on any Obsidian
+platform</h2>
+<p>Omnighost is distributed as a community plugin. The easiest route
+before community-directory release is the <strong>BRAT</strong> plugin
+mentioned earlier:</p>
+<ol type="1">
+<li>Install and enable <strong>BRAT</strong> from the community plugin
+directory.</li>
+<li>Run the command <strong>“BRAT: Add a beta plugin for
+testing”</strong> and give it the plugin’s repository
+(e.g. <code>firstpair/omnighost</code>).</li>
+<li>Enable <strong>Omnighost</strong> under <strong>Settings → Community
+plugins</strong>.</li>
+</ol>
+<p>That works on desktop and mobile Obsidian. You can also install it by
+hand: copy the plugin’s <code>main.js</code>,
+<code>manifest.json</code>, and <code>styles.css</code> into
+<code>.obsidian/plugins/omnighost/</code> in your vault. Because the
+plugin lives inside the vault, the same First Pair Press vault can carry
+its publishing tools from Mac to iPad to iPhone.</p>
+</section>
+<section id="ch011.xhtml_connecting-to-your-site" class="level2">
+<h2 data-number="10.4" id="connecting-to-your-site"><span
+class="header-section-number">10.4</span> Connecting to your site</h2>
+<p>In <strong>Settings → Omnighost</strong>, the first section is
+<strong>Ghost blogs</strong>. Add one block per Ghost site. Each blog
+has:</p>
+<ul>
+<li>a display <strong>Name</strong>;</li>
+<li>a <strong>Site address</strong> such as
+<code>https://yourblog.com</code>;</li>
+<li>an <strong>Admin API Key</strong>, which you create in Ghost admin
+under <em>Settings → Integrations → Add custom integration</em> and
+paste into that blog’s key field;</li>
+<li>a vault <strong>Folder</strong> for that blog’s posts;</li>
+<li>an <strong>Auto-sync this folder</strong> toggle; and</li>
+<li>an optional per-blog <strong>Sync interval</strong>.</li>
+</ul>
+<p>Tap <strong>Save key</strong> for each blog. Omnighost stores the key
+in Obsidian’s secure keychain and immediately tests the connection. A
+good connection greets you by the Ghost site’s name. If two blogs
+accidentally share the same keychain secret, settings warns you, because
+the wrong key will fail with a Ghost 401.</p>
+<p>For First Pair Press, think of each blog block as one public voice:
+the press site, a project site, a research notebook, a partner
+publication, or a newsletter-facing Ghost instance. Each one gets its
+own credentials and folder, but the writer stays in one Obsidian
+vault.</p>
+</section>
+<section id="ch011.xhtml_the-properties-that-control-a-post"
+class="level2">
+<h2 data-number="10.5" id="the-properties-that-control-a-post"><span
+class="header-section-number">10.5</span> The properties that control a
+post</h2>
+<p>Each note you publish carries a few special properties. With the
+current default prefix they read <code>ghost_…</code>; many people
+shorten the prefix to <code>g_…</code> so the names fit better on a
+phone. The essentials:</p>
+<ul>
+<li><code>g_blog</code> — a list of blog names or domain keys. Omit it
+to use the default blog.</li>
+<li><code>g_published</code> — a checkbox. <strong>Off</strong> keeps
+the post a <em>draft</em>; <strong>on</strong> publishes it.</li>
+<li><code>g_post_access</code> — the visibility: <code>public</code>,
+<code>members</code>, or <code>paid</code>.</li>
+<li><code>g_published_at</code> — a date, used only when you want to
+<em>schedule</em> a post for the future.</li>
+<li><code>g_slug</code> — the post’s URL ending. Leave it empty to
+derive one from the title.</li>
+<li><code>g_tags</code>, <code>g_excerpt</code>,
+<code>g_feature_image</code>, <code>g_cover_from_first_image</code> —
+tags, a short summary, a cover image, and the optional “use the first
+body image as cover” behavior.</li>
+<li><code>g_no_sync</code> — a per-note safety switch. Turn it on to
+skip that note.</li>
+<li><code>g_id_example_com</code>, <code>g_url_example_com</code>,
+<code>g_public_url_example_com</code> — written <em>by the plugin</em>
+after a successful publish to <code>example.com</code>. You don’t edit
+these; they’re how Omnighost finds that blog’s post again and how you
+reach it on the web.</li>
+</ul>
+<p>Older notes may have clean keys like <code>g_id</code> or map keys
+like <code>g_ids</code>. Omnighost migrates those forward as it syncs.
+The command <strong>Normalize blog references (use domain keys)</strong>
+rewrites blog references to stable domain-based keys, so renaming a blog
+does not break note-to-post links.</p>
+</section>
+<section id="ch011.xhtml_the-easy-way-the-properties-modal"
+class="level2">
+<h2 data-number="10.6" id="the-easy-way-the-properties-modal"><span
+class="header-section-number">10.6</span> The easy way: the properties
+modal</h2>
+<p>Editing those keys by hand in the native Properties panel works, but
+the values are free text — easy to mistype <code>Public</code> when
+Ghost wants <code>public</code>. Omnighost adds a dedicated <strong>Edit
+ghost properties</strong> dialog (open it from the ghost ribbon icon,
+the editor’s right-click menu, or the command palette) with proper
+controls:</p>
+<ul>
+<li><strong>Status</strong> — a dropdown: <em>Draft</em>, <em>Publish
+now</em>, or <em>Schedule</em> (which reveals a date field).</li>
+<li><strong>Visibility</strong> — a dropdown: <em>Public</em>,
+<em>Members only</em>, or <em>Paid</em>.</li>
+<li>Toggles for <em>Featured</em> and <em>Use first image as
+cover</em>.</li>
+<li>Plain text for <em>Tags</em>, <em>Slug</em>, <em>Excerpt</em>,
+<em>Feature image</em>.</li>
+<li>If you have more than one blog configured, a <strong>Blogs</strong>
+checklist for choosing exactly where this note publishes.</li>
+<li>A status line showing whether the post is <strong>Published</strong>
+(with the live URL and a copy button) once it has actually gone
+out.</li>
+<li>Two buttons: <strong>Save</strong> (write the properties) and
+<strong>Save &amp; sync</strong> (write <em>and</em> publish in one
+tap).</li>
+</ul>
+<p>Because the choices are dropdowns, you can’t accidentally enter an
+invalid value. That single dialog is the recommended way to publish.</p>
+</section>
+<section id="ch011.xhtml_a-first-publish-start-to-finish"
+class="level2">
+<h2 data-number="10.7"
+id="a-first-first-pair-press-publish-start-to-finish"><span
+class="header-section-number">10.7</span> A first First Pair Press
+publish, start to finish</h2>
+<ol type="1">
+<li>Write a note. Give it a real title — either a <code># Heading</code>
+at the top or a sensible filename, because the title drives the post’s
+web address.</li>
+<li>Add the images, diagrams, screenshots, or cover art that should
+travel with it.</li>
+<li>Open <strong>Edit ghost properties</strong>.</li>
+<li>Pick the target blog or blogs.</li>
+<li>Set <strong>Status</strong> to <em>Publish now</em>,
+<strong>Visibility</strong> to <em>Public</em>.</li>
+<li>Tap <strong>Save &amp; sync</strong>.</li>
+<li>Watch the status line flip to <strong>Published</strong> with a live
+link, and tap the copy button to grab the URL.</li>
+</ol>
+<p>Here’s the result on the open web — a note written on a phone, now a
+public post:</p>
+<figure>
+<img src="docs/book/media/file6.png"
+alt="The same note published as a public post on a Ghost site, viewed in a mobile browser. The subscribe box at the bottom is Ghost’s standard newsletter call-to-action on public posts — not a paywall." />
+<figcaption aria-hidden="true">The same note published as a public post
+on a Ghost site, viewed in a mobile browser. The subscribe box at the
+bottom is Ghost’s standard newsletter call-to-action on public posts —
+not a paywall.</figcaption>
+</figure>
+<p>To <strong>change</strong> the post later, edit the note and
+<strong>Save &amp; sync</strong> again. The plugin finds the existing
+post by its stored id and updates it — same URL, no duplicate. You can
+also run <strong>Sync current note to ghost</strong> from the command
+palette, or use the periodic folder sync if it is enabled for that
+blog.</p>
+</section>
+<section id="ch011.xhtml_publishing-to-more-than-one-blog"
+class="level2">
+<h2 data-number="10.8"
+id="spreading-the-word-through-multiple-blogs"><span
+class="header-section-number">10.8</span> Spreading the word through
+multiple blogs</h2>
+<p>Omnighost can manage several Ghost sites at once. For First Pair
+Press, this is the feature that turns a finished note into a real
+publicity surface.</p>
+<figure>
+<img src="docs/book/diagrams/multi-blog-routing.png"
+alt="One note can route through Omnighost to several Ghost blogs, each with its own folder, key, and post identity." />
+<figcaption aria-hidden="true">One note can route through Omnighost to
+several Ghost blogs, each with its own folder, key, and post
+identity.</figcaption>
+</figure>
+<p>In <strong>Settings → Omnighost</strong>, the <strong>Ghost
+blogs</strong> section lets you <strong>Add blog</strong>. Each one gets
+its own name, site address, Admin API key (a keychain secret), folder in
+your vault, sync toggle, and optional interval. One blog is marked the
+default (★), and a <strong>Test</strong> button confirms each connection
+by name.</p>
+<p>Blog folders nest under one root. By default each blog’s folder
+derives from its site address as
+<strong><code>Ghost Posts/&lt;domain&gt;</code></strong> —
+<code>Ghost Posts/chief.sc</code>, <code>Ghost Posts/collected.ga</code>
+— so all your publishing lives under a single top-level folder. Leave a
+blog’s <strong>Folder</strong> field blank for the automatic path, or
+type your own to override it. If your blogs predate this layout and sit
+in scattered folders, the <strong>Organize folders by domain</strong>
+button in settings moves every blog’s notes (archives included) into
+place with links intact, and re-points the folders — nothing changes
+until you confirm.</p>
+<p>To choose where a note goes, run the command <strong>“Set blog(s) for
+this note.”</strong> A checklist appears; tick one or more blogs and
+confirm. Your choice is saved in the note’s
+<strong><code>g_blog</code></strong> property and sticks. If you tick
+several blogs, syncing the note publishes — and later updates —
+<em>all</em> of them at once. The last blog you pick becomes the default
+for the next new note.</p>
+<p>The folders themselves also route. A note with no <code>g_blog</code>
+property publishes to the blog whose folder it sits in — drag a draft
+into <code>Ghost Posts/chief.sc/</code> and that is where it goes. Notes
+directly under the root belong to the default blog. An explicit
+<code>g_blog</code> always wins over location.</p>
+<p>Selective sync has two levels. For one note, set
+<code>g_no_sync: true</code> and Omnighost leaves it alone. For a whole
+blog folder, turn off <strong>Auto-sync this folder</strong> in that
+blog’s settings; manual sync still works when you ask for it.</p>
+<p>A typical First Pair Press announcement might start as one note:</p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="fu">g_blog</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;firstpair.press&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;chief.sc&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;collected.ga&quot;</span><span class="kw">]</span></span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="fu">g_slug</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;omnighost-first-pair-press&quot;</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="fu">g_tags</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="at">first-pair-press</span><span class="kw">,</span><span class="at"> omnighost</span><span class="kw">,</span><span class="at"> publishing</span><span class="kw">]</span></span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="fu">g_excerpt</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;Omnighost turns an Obsidian vault into the web publishing rail for First Pair Press.&quot;</span></span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a><span class="fu">g_cover_from_first_image</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="fu">g_published</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="pp">---</span></span></code></pre></div>
+<p>On sync, Omnighost creates or updates one Ghost post per blog and
+writes back separate identity keys for each target. That means the press
+can spread the same news across several audiences while preserving one
+source note and one edit loop. If the subtitle changes, the image needs
+a better caption, or a date moves, a second sync updates every linked
+post in place.</p>
+<p>To bring an existing site into Obsidian, run <strong>“Import all
+posts from a ghost blog,”</strong> choose one or more blogs, and every
+post arrives as a note in that blog’s folder, already tagged with its
+<code>g_blog</code> and per-blog id/URL keys. To import one post, use
+<strong>Import post from ghost</strong> with the Ghost editor URL. To
+connect an existing note to an existing Ghost post, use <strong>Link
+note to ghost post</strong> and choose whether Ghost overwrites the note
+or the note syncs up to Ghost.</p>
+<p>One thing to know: a note’s identity on each blog is its stored id,
+with the slug as the fallback before the first id is written. Keep slugs
+stable once a note is published widely. If you remove a blog from
+<code>g_blog</code> after the note has already published there, the next
+interactive sync warns about the orphaned Ghost post. You can delete it
+on Ghost, keep it by re-adding that blog, or decide later.</p>
+</section>
+<section id="ch011.xhtml_importing-textpacks" class="level2">
+<h2 data-number="10.9" id="importing-textpacks"><span
+class="header-section-number">10.9</span> Importing textpacks</h2>
+<p>A <strong>textpack</strong> is a small zip that bundles a Markdown
+post together with its images — the format writing apps like Ulysses use
+to move documents between devices. Omnighost imports textpacks directly,
+which makes it the last mile for drafts prepared elsewhere: a post
+written in a project repo, exported from a book pipeline, or polished in
+another writing app travels to your phone as one file and leaves it as a
+publishable First Pair Press draft.</p>
+<p>There are two ways in:</p>
+<ul>
+<li><strong>Import textpack</strong> (command palette) opens a file
+picker. Choose the pack and a target blog, and the note is created on
+the spot.</li>
+<li>Save the pack <strong>into the vault</strong> from any share sheet —
+in the Files app, long-press the pack, then <em>Share → Save to Files →
+your vault</em>. Omnighost imports it automatically: a scan at startup
+catches packs that arrived while Obsidian was closed, a live watcher
+catches ones saved while it is open, and the pack file itself moves to
+trash once the note exists. This is the practical route on iOS, where
+Obsidian cannot appear in the Files app’s “Open With…” menu. The
+behavior is governed by the <strong>Auto-import textpacks</strong>
+toggle (on by default), and an <strong>“Import textpacks found in
+vault”</strong> command runs the same sweep by hand.</li>
+</ul>
+<p>Either way the result is the same: the note lands in the blog’s
+folder with its Ghost properties already set, and its images are placed
+under <code>assets/&lt;slug&gt;/</code> next to it — they upload to
+Ghost automatically on the first sync, like any other local image. The
+note arrives as a <em>draft</em>, so nothing is published until you
+decide.</p>
+<p>A pack can also carry its own publishing instructions — blog, slug,
+title, tags, excerpt — embedded in the bundle’s <code>info.json</code>
+under Omnighost metadata. Packs prepared with the companion
+<code>textpack.py</code> script target the right blog by themselves:
+save the file, open Obsidian, review the draft, sync, done.</p>
+<p>This is how First Pair Press can connect repo-native writing to
+mobile publishing. A project can build a textpack with rendered
+diagrams, screenshots, and metadata; iCloud or another sync path drops
+it into the vault; Omnighost imports it; the editor checks the note on
+whichever Obsidian device is in hand; and the same note can then publish
+to the press blog, the project blog, or both.</p>
+</section>
+<section id="ch011.xhtml_bulk-delete-and-safe-cleanup" class="level2">
+<h2 data-number="10.10" id="bulk-delete-and-safe-cleanup"><span
+class="header-section-number">10.10</span> Bulk delete and safe
+cleanup</h2>
+<p>Publishing tools need a careful delete story. Omnighost never deletes
+remote posts silently.</p>
+<figure>
+<img src="docs/book/diagrams/bulk-delete.png"
+alt="Bulk delete is a checklist workflow with final confirmation, optional per-post prompts, and local archive support." />
+<figcaption aria-hidden="true">Bulk delete is a checklist workflow with
+final confirmation, optional per-post prompts, and local archive
+support.</figcaption>
+</figure>
+<p>Run <strong>“Bulk delete posts (local notes + ghost)”</strong> to
+choose one or more blogs. Omnighost lists the linked notes and Ghost
+posts it can find. Nothing is preselected — tick exactly the posts you
+want gone, or use the <strong>Select all</strong> checkbox at the top of
+the list. When you confirm, Omnighost deletes only the selected Ghost
+posts. It also removes the selected local notes.</p>
+<p>If <strong>Archive deleted notes</strong> is on, local notes move
+into an archive subfolder inside their blog folder instead of going to
+trash. Omnighost stamps them with archive metadata and
+<code>g_no_sync: true</code>, so archived notes are not accidentally
+re-published. If the archive option is off, the notes go to Obsidian
+trash.</p>
+<p>Two extra settings control how cautious the workflow is:</p>
+<ul>
+<li><strong>Prompt on folder delete</strong> — if you delete a folder of
+synced notes, Omnighost opens the same checklist for their linked Ghost
+posts. The notes are already gone locally, but the Ghost posts are still
+untouched until you confirm. Notes that merely <em>moved</em> elsewhere
+in the vault are tracked and never offered — deleting an old, emptied
+folder after reorganizing brings up nothing.</li>
+<li><strong>Confirm each remote delete</strong> — during a bulk delete,
+Omnighost shows each post and blog name with <strong>Delete</strong>,
+<strong>Skip</strong>, and <strong>Stop</strong>.</li>
+</ul>
+</section>
+<section id="ch011.xhtml_when-something-goes-wrong" class="level2">
+<h2 data-number="10.11" id="when-something-goes-wrong"><span
+class="header-section-number">10.11</span> When something goes
+wrong</h2>
+<p>Ghost validates posts, and when a field is off it returns a precise
+message. Reading that message is the fastest way to fix it:</p>
+<figure>
+<img src="docs/book/media/file7.png"
+alt="A Ghost validation error surfaced in Obsidian. The text names the exact problem — here, a slug longer than Ghost’s 191-character limit — which points straight at the fix." />
+<figcaption aria-hidden="true">A Ghost validation error surfaced in
+Obsidian. The text names the exact problem — here, a slug longer than
+Ghost’s 191-character limit — which points straight at the
+fix.</figcaption>
+</figure>
+<p>A few common cases and what they mean:</p>
+<ul>
+<li><strong>“Successfully connected” shows the wrong name, or connection
+fails</strong> — that blog’s Ghost URL or Admin API Key is wrong.
+Re-enter them in the blog block; the greeting confirms the right
+site.</li>
+<li><strong>A slug-length error</strong> (as pictured) — the note had no
+heading, so the title fell back to a long first paragraph. Give the note
+a short <code># Heading</code> or set <code>g_slug</code>
+explicitly.</li>
+<li><strong>The post looks “paywalled” but you set it public</strong> —
+check the body: if the <em>content</em> is visible and only a
+<em>Subscribe</em> box sits at the bottom, that box is Ghost’s normal
+newsletter call-to-action on public posts, not a lock. Confirm the
+visibility in Ghost admin to be sure.</li>
+<li><strong>It shows “Published” but you got an error</strong> — newer
+versions tie the green “Published” badge to a real published URL, so a
+failed sync won’t falsely show green. If yours does, update the
+plugin.</li>
+<li><strong>A blog sync says the key is missing</strong> — each blog
+needs its own stored Admin API key. Paste the key into that blog’s
+<strong>Admin API key</strong> field and tap <strong>Save
+key</strong>.</li>
+</ul>
+</section>
+<section id="ch011.xhtml_why-updater-is-the-whole-point" class="level2">
+<h2 data-number="10.12" id="why-updating-is-the-whole-point"><span
+class="header-section-number">10.12</span> Why updating is the whole
+point</h2>
+<p>Plenty of tools can <em>post</em> from a note. The hard part — and
+the reason this plugin exists — is <em>re-posting the same note without
+making a mess</em>, especially when the same announcement appears on
+several blogs. Omnighost keeps a stable link between one note and each
+of its Ghost posts: edit the note, sync, and the live posts change in
+place. The First Pair Press vault stays the single source of truth, and
+the web stays in step with it.</p>
+</section>
+</section>
+<p><span id="ch012.xhtml"></span></p>
+<section id="ch012.xhtml_where-to-go-next" class="level1">
+<h1 data-number="11" id="where-to-go-next"><span
+class="header-section-number">11</span> Where to Go Next</h1>
+<p>You now have the whole loop: capture ideas as notes, connect them
+with links, organize lightly with folders, tags, and properties, find
+anything in a tap, extend the app with plugins, sync across your
+devices, and — when a note is ready for the world — publish it through
+Omnighost to the First Pair Press web.</p>
+<p>A few directions from here:</p>
+<ul>
+<li><strong>Lean on the official docs.</strong> The most current,
+detailed reference is at <em>help.obsidian.md</em>, with developer
+material at <em>docs.obsidian.md</em>. When a menu or setting looks
+different from this book, trust the docs — apps move fast.</li>
+<li><strong>Build the press blogs deliberately.</strong> Add one Ghost
+blog at a time, test its key, give it a clear folder, and publish one
+safe draft before turning on periodic sync.</li>
+<li><strong>Package announcements as textpacks.</strong> For repo-driven
+projects, make the <code>.textpack</code> the handoff format so
+Markdown, images, and Omnighost metadata travel together.</li>
+<li><strong>Use multi-blog publishing when the audience
+overlaps.</strong> A release can reach the press site, a project blog,
+and a personal channel from one source note.</li>
+<li><strong>Back up.</strong> Your notes are plain files; treat them as
+precious and copy them somewhere safe.</li>
+</ul>
+<p>Most of all: keep the loop alive. Write in Obsidian, review the
+properties, sync through Omnighost, then keep improving the source note
+as the public story evolves.</p>
+</section>
+<p><span id="ch013.xhtml"></span></p>
+<section id="ch013.xhtml_appendix-a-markdown-cheat-sheet"
+class="level1">
+<h1 data-number="12" id="appendix-a-markdown-cheat-sheet"><span
+class="header-section-number">12</span> Appendix A: Markdown Cheat
+Sheet</h1>
+<pre class="text"><code># Heading 1        ## Heading 2        ### Heading 3
+**bold**           *italic*            ~~strikethrough~~
+- bullet           1. numbered         - [ ] / - [x] task
+&gt; quote            `inline code`       [[Link to a note]]
+#tag               ![alt](image.png)   [text](https://link)
+
+(For multi-line code, fence it with three backticks on their own lines.)</code></pre>
+</section>
+<p><span id="ch014.xhtml"></span></p>
+<section id="ch014.xhtml_appendix-b-omnighost-property-reference"
+class="level1">
+<h1 data-number="13" id="appendix-b-omnighost-property-reference"><span
+class="header-section-number">13</span> Appendix B: Omnighost Property
+Reference</h1>
+<p>With the default prefix the keys begin <code>ghost_</code>; many
+users shorten it to <code>g_</code>. The table below uses
+<code>g_</code> for compactness. If your prefix is <code>ghost_</code>,
+read <code>g_published</code> as <code>ghost_published</code>, and so
+on.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Property</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>g_blog</code></td>
+<td>list of names or domains</td>
+<td>Which blog(s) the note publishes to (default if absent)</td>
+</tr>
+<tr>
+<td><code>g_published</code></td>
+<td>checkbox</td>
+<td>Off = draft, on = published</td>
+</tr>
+<tr>
+<td><code>g_post_access</code></td>
+<td><code>public</code> / <code>members</code> / <code>paid</code></td>
+<td>Who can read it</td>
+</tr>
+<tr>
+<td><code>g_published_at</code></td>
+<td>date</td>
+<td>Future date schedules the post</td>
+</tr>
+<tr>
+<td><code>g_featured</code></td>
+<td>checkbox</td>
+<td>Mark as a featured post</td>
+</tr>
+<tr>
+<td><code>g_slug</code></td>
+<td>text</td>
+<td>URL ending (empty = from title)</td>
+</tr>
+<tr>
+<td><code>g_tags</code></td>
+<td>list</td>
+<td>Post tags</td>
+</tr>
+<tr>
+<td><code>g_excerpt</code></td>
+<td>text</td>
+<td>Short summary (max 300 chars)</td>
+</tr>
+<tr>
+<td><code>g_feature_image</code></td>
+<td>text</td>
+<td>Cover image URL</td>
+</tr>
+<tr>
+<td><code>g_cover_from_first_image</code></td>
+<td>checkbox</td>
+<td>Use the first body image as the cover</td>
+</tr>
+<tr>
+<td><code>g_no_sync</code></td>
+<td>checkbox</td>
+<td>Skip this note when syncing</td>
+</tr>
+<tr>
+<td><code>g_id_&lt;blog&gt;</code></td>
+<td>written by plugin</td>
+<td>The Ghost id for one target blog, using a domain-based suffix</td>
+</tr>
+<tr>
+<td><code>g_url_&lt;blog&gt;</code></td>
+<td>written by plugin</td>
+<td>The Ghost editor link for that blog’s post</td>
+</tr>
+<tr>
+<td><code>g_public_url_&lt;blog&gt;</code></td>
+<td>written by plugin</td>
+<td>The live, public web address for that blog’s post</td>
+</tr>
+<tr>
+<td><code>g_archived</code></td>
+<td>written by plugin</td>
+<td>True when a bulk-deleted local note is archived</td>
+</tr>
+<tr>
+<td><code>g_archived_at</code></td>
+<td>written by plugin</td>
+<td>When the note was moved into the archive folder</td>
+</tr>
+<tr>
+<td><code>g_archived_from</code></td>
+<td>written by plugin</td>
+<td>The note’s original vault path before archive</td>
+</tr>
+</tbody>
+</table>
+<p>Legacy single-blog notes may contain <code>g_id</code>,
+<code>g_url</code>, or <code>g_public_url</code>. Omnighost reads them
+for compatibility and migrates toward per-blog keys on later syncs.</p>
+</section>
+</body>
+</html>
