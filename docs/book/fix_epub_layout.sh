@@ -24,12 +24,18 @@ mkdir -p "$workdir"
 unzip -q "$epub" -d "$workdir"
 
 content_opf="$workdir/EPUB/content.opf"
+image_cover_xhtml="$workdir/EPUB/text/cover.xhtml"
 cover_xhtml="$workdir/EPUB/text/ch001.xhtml"
 fixed="$tmpdir/fixed.epub"
 
 perl -0pi -e '
+  s#<spine toc="ncx">\s*<itemref idref="cover_xhtml" />\s*<itemref idref="nav" />\s*<itemref idref="ch001_xhtml" />#<spine toc="ncx">\n    <itemref idref="cover_xhtml" />\n    <itemref idref="ch001_xhtml" />\n    <itemref idref="nav" linear="no" />#s;
   s#<spine toc="ncx">\s*<itemref idref="nav" />\s*<itemref idref="ch001_xhtml" />#<spine toc="ncx">\n    <itemref idref="ch001_xhtml" />\n    <itemref idref="nav" linear="no" />#s;
 ' "$content_opf"
+
+if [[ -f "$image_cover_xhtml" ]]; then
+  perl -0pi -e 's#<body id="cover">#<body id="cover" epub:type="cover">#' "$image_cover_xhtml"
+fi
 
 if [[ -n "$library_title" ]]; then
   LIBRARY_TITLE="$library_title" perl -0pi -e '

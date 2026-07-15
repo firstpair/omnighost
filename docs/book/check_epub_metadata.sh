@@ -26,12 +26,16 @@ opf_flat="$tmpdir/content.flat"
 toc="$tmpdir/toc.ncx"
 toc_flat="$tmpdir/toc.flat"
 nav="$tmpdir/nav.xhtml"
+image_cover="$tmpdir/cover.xhtml"
 cover="$tmpdir/ch001.xhtml"
 stylesheet="$tmpdir/stylesheet1.css"
+embedded_cover="$tmpdir/embedded-cover.png"
+source_cover="$(cd "$(dirname "$0")" && pwd)/assets/omnighost-cover.png"
 
 unzip -p "$epub" EPUB/content.opf > "$opf"
 unzip -p "$epub" EPUB/toc.ncx > "$toc"
 unzip -p "$epub" EPUB/nav.xhtml > "$nav"
+unzip -p "$epub" EPUB/text/cover.xhtml > "$image_cover"
 unzip -p "$epub" EPUB/text/ch001.xhtml > "$cover"
 unzip -p "$epub" EPUB/styles/stylesheet1.css > "$stylesheet"
 tr '\n\r\t' '   ' < "$opf" > "$opf_flat"
@@ -75,10 +79,14 @@ require_pattern '<dc:creator[^>]*>Alexy Khrabrov</dc:creator>' "$opf" "missing d
 require_pattern '<dc:language>en-US</dc:language>' "$opf" "missing dc:language"
 require_pattern '<dc:date[^>]*>[0-9]{4}-[0-9]{2}-[0-9]{2}</dc:date>' "$opf" "missing dc:date"
 require_pattern '<meta[^>]+property="dcterms:modified"' "$opf" "missing dcterms:modified"
-require_pattern '<spine toc="ncx">[[:space:]]*<itemref idref="ch001_xhtml" />[[:space:]]*<itemref idref="nav" linear="no" />' "$opf_flat" "cover is not first in the reading spine"
+require_pattern '<meta name="cover" content="[^ "]+" />' "$opf" "missing EPUB 2 cover metadata"
+require_pattern '<item[^>]+properties="cover-image"[^>]+href="media/[^ "]+\.png"' "$opf" "missing EPUB 3 cover-image manifest item"
+require_pattern '<spine toc="ncx">[[:space:]]*<itemref idref="cover_xhtml" />[[:space:]]*<itemref idref="ch001_xhtml" />[[:space:]]*<itemref idref="nav" linear="no" />' "$opf_flat" "illustrated cover and title page are not first in the reading spine"
 require_pattern "<docTitle>[[:space:]]*<text>$visible_title_pattern</text>[[:space:]]*</docTitle>" "$toc_flat" "NCX title is not the visible title"
 require_pattern "<title>$visible_title_pattern</title>" "$nav" "nav document title is not the visible title"
 require_pattern "<h1[^>]*>$visible_title_pattern</h1>" "$nav" "nav table-of-contents heading is not the visible title"
+require_pattern '<body id="cover" epub:type="cover">' "$image_cover" "illustrated cover XHTML is not marked as the cover"
+require_pattern '<image[^>]+xlink:href="\.\./media/[^ "]+\.png"' "$image_cover" "illustrated cover XHTML does not reference the embedded cover image"
 require_pattern '<body epub:type="frontmatter">' "$cover" "cover XHTML is not frontmatter"
 require_pattern "<section id=\"$cover_id\" epub:type=\"titlepage\"" "$cover" "custom cover is not the first cover section"
 require_pattern "<h1[^>]*text-align:[[:space:]]*center[^>]*>$visible_title_pattern</h1>" "$cover" "cover title is not explicitly centered"
@@ -91,6 +99,17 @@ reject_pattern 'UNTITLED|Unknown' "$toc" "fallback NCX metadata found"
 reject_pattern 'UNTITLED|Unknown' "$nav" "fallback nav metadata found"
 reject_pattern "<h1 class=\"unnumbered\">$visible_title_pattern</h1>" "$cover" "generated top-level cover heading found"
 reject_pattern 'display:[[:space:]]*flex' "$cover" "cover uses flexbox, which is fragile on Kindle"
+
+cover_href="$(perl -ne 'if (/<item(?=[^>]*properties="cover-image")(?=[^>]*href="([^"]+)")[^>]*>/) { print $1; exit }' "$opf")"
+if [[ -z "$cover_href" ]]; then
+  echo "EPUB metadata check failed: could not resolve embedded cover path" >&2
+  exit 1
+fi
+unzip -p "$epub" "EPUB/$cover_href" > "$embedded_cover"
+if [[ ! -f "$source_cover" ]] || ! cmp -s "$source_cover" "$embedded_cover"; then
+  echo "EPUB metadata check failed: embedded cover differs from source cover" >&2
+  exit 1
+fi
 
 if unzip -l "$epub" | awk '{print $4}' | grep -qx 'EPUB/text/title_page.xhtml'; then
   echo "EPUB metadata check failed: generated empty title_page.xhtml is present" >&2

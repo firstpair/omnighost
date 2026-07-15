@@ -22,5 +22,11 @@ empty generated title page, and sets the Kindle-facing title to
 `omnighost (<package-version>)`. The source validator checks that layout and
 metadata after the shared build.
 
+The illustrated assets live under `docs/book/assets/`. The portrait cover is
+the canonical PDF and EPUB cover, while `cover.md` remains the accessible
+interior title page used by the HTML and EPUB reading flows. The wide
+`omnighost-headboard.png` is the FirstPair book-detail hero and intentionally
+keeps its left side quiet for overlaid catalog text.
+
 The plugin version comes from root `package.json`. Builds do not publish,
 deploy, upload, or copy artifacts to iCloud.

@@ -10,6 +10,7 @@
   "title": "Omnighost for First Pair Press",
   "subtitle": "Publishing from Obsidian to Ghost Across Every Blog",
   "author": "Alexy Khrabrov",
+  "headboardImage": "docs/book/assets/omnighost-headboard.png",
   "version": {
     "source": "package",
     "file": "package.json"
@@ -25,6 +26,16 @@
     "tocDepth": 2,
     "numberSections": true,
     "resourcePaths": ["docs/book", "${repoRoot}"]
+  },
+  "pdf": {
+    "coverImage": "docs/book/assets/omnighost-cover.png",
+    "coverWidth": "6in",
+    "coverHeight": "9.6in",
+    "coverFit": "cover"
+  },
+  "epub": {
+    "coverImage": "docs/book/assets/omnighost-cover.png",
+    "includeRenderedCover": true
   },
   "pdfFormats": [
     {

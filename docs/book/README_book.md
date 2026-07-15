@@ -1,7 +1,9 @@
 # Omnighost Book Source
 
-This directory contains the manuscript, cover, metadata, diagrams, screenshots,
-and source-specific hooks for *Omnighost for First Pair Press*.
+This directory contains the manuscript, metadata, illustrated cover and
+headboard under `assets/`, the accessible interior title page in `cover.md`,
+diagrams, screenshots, and source-specific hooks for *Omnighost for First Pair
+Press*.
 
 Build from the repository root:
 
