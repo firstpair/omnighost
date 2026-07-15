@@ -1,5 +1,5 @@
 import { App, requestUrl, RequestUrlResponse } from 'obsidian';
-import { GhostPost } from '../types';
+import { GhostPost, GhostPostWrite } from '../types';
 import { normalizeGhostSiteUrl } from './url';
 
 const LARGE_IMAGE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
@@ -7,6 +7,43 @@ const TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
 const MAX_UPLOAD_IMAGE_DIMENSION = 2400;
 const MIN_UPLOAD_IMAGE_DIMENSION = 1200;
 const COMPRESSIBLE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+export interface GhostPostUpdateResult {
+	post: GhostPost;
+	changed: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	if (Array.isArray(left) || Array.isArray(right)) {
+		if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
+		return left.every((value, index) => jsonValuesEqual(value, right[index]));
+	}
+	if (!isRecord(left) || !isRecord(right)) return false;
+	const leftKeys = Object.keys(left);
+	const rightKeys = Object.keys(right);
+	if (leftKeys.length !== rightKeys.length) return false;
+	return leftKeys.every(key => key in right && jsonValuesEqual(left[key], right[key]));
+}
+
+function lexicalDocumentsEqual(left: string, right: string): boolean {
+	if (left === right) return true;
+	try {
+		return jsonValuesEqual(JSON.parse(left) as unknown, JSON.parse(right) as unknown);
+	} catch {
+		return false;
+	}
+}
+
+function timestampsEqual(left: string | null, right: string | null): boolean {
+	if (left === right) return true;
+	if (left === null || right === null) return false;
+	return Date.parse(left) === Date.parse(right);
+}
 
 interface PreparedImageUpload {
 	data: ArrayBuffer;
@@ -23,6 +60,22 @@ export class GhostAPIClient {
 	private apiUrl: string;
 	private apiKey: string;
 	private app: App;
+
+	private postMatchesUpdate(current: GhostPost, requested: GhostPostWrite): boolean {
+		if (current.title !== requested.title) return false;
+		if (!lexicalDocumentsEqual(current.lexical, requested.lexical)) return false;
+		if (current.status !== requested.status) return false;
+		if (current.visibility !== requested.visibility) return false;
+		if (current.featured !== requested.featured) return false;
+		if (current.slug !== requested.slug) return false;
+		if ((current.custom_excerpt ?? null) !== requested.custom_excerpt) return false;
+		if ((current.feature_image ?? null) !== requested.feature_image) return false;
+		if (requested.published_at !== undefined && !timestampsEqual(current.published_at, requested.published_at)) return false;
+		const currentNames = (current.tags ?? []).map(tag => tag.name);
+		const requestedNames = requested.tags.map(tag => tag.name);
+		if (!jsonValuesEqual(currentNames, requestedNames)) return false;
+		return true;
+	}
 
 	constructor(ghostUrl: string, apiKey: string, app: App) {
 		this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
@@ -462,7 +515,7 @@ export class GhostAPIClient {
 	/**
 	 * Create a new post
 	 */
-	async createPost(post: Partial<GhostPost>): Promise<GhostPost> {
+	async createPost(post: GhostPostWrite): Promise<GhostPost> {
 		try {
 			const response = await this.makeRequest('/posts/', 'POST', { posts: [post] });
 
@@ -481,10 +534,14 @@ export class GhostAPIClient {
 	/**
 	 * Update an existing post
 	 */
-	async updatePost(postId: string, post: Partial<GhostPost>): Promise<GhostPost> {
+	async updatePost(postId: string, post: GhostPostWrite): Promise<GhostPostUpdateResult> {
 		try {
 			// First, get the current post to retrieve updated_at
 			const currentPost = await this.getPost(postId);
+			if (this.postMatchesUpdate(currentPost, post)) {
+				console.debug(`[Ghost API] Post ${postId} is unchanged; skipping update`);
+				return { post: currentPost, changed: false };
+			}
 
 			// Include updated_at from current post for version control
 			const postWithVersion = {
@@ -493,7 +550,7 @@ export class GhostAPIClient {
 			};
 
 			console.debug('[Ghost API] Sending update with fields:', Object.keys(postWithVersion));
-			console.debug('[Ghost API] Excerpt value:', postWithVersion.excerpt);
+			console.debug('[Ghost API] Excerpt value:', postWithVersion.custom_excerpt);
 			console.debug('[Ghost API] Full post data:', JSON.stringify(postWithVersion, null, 2).substring(0, 500));
 
 			const response = await this.makeRequest(`/posts/${postId}/`, 'PUT', { posts: [postWithVersion] });
@@ -503,7 +560,7 @@ export class GhostAPIClient {
 			}
 
 			const data = response.json as { posts: GhostPost[] };
-			return data.posts[0];
+			return { post: data.posts[0], changed: true };
 		} catch (error) {
 			console.error('Error updating post:', error);
 			throw error;

@@ -1,6 +1,6 @@
 import { App, TFile, Notice, parseYaml } from 'obsidian';
 import { GhostAPIClient } from '../ghost/api-client';
-import { GhostWriterSettings, GhostPost } from '../types';
+import { GhostWriterSettings, GhostPost, GhostPostWrite } from '../types';
 import { parseGhostMetadata, extractContent, updateFrontmatterWithGhostId, updateFrontmatterWithGhostUrl, upsertGhostMetadata, splitFrontmatter, joinFrontmatter, yamlString, yamlStringArray } from '../frontmatter-parser';
 import { generateSlug, normalizePaywallMarker } from '../converters/markdown-to-html';
 import { htmlToMarkdown } from '../converters/html-to-markdown';
@@ -282,14 +282,19 @@ export class SyncEngine {
 
 			console.debug('[Ghost Sync] Final status:', status);
 
-			// Prepare Ghost post data
-			const postData: Record<string, unknown> = {
+			// Prepare the complete set of fields Omnighost manages. Empty tags and
+			// nullable fields are sent explicitly so removals are real changes.
+			// Ghost's writable excerpt field is `custom_excerpt`; `excerpt` is read-only.
+			const postData: GhostPostWrite = {
 				title,
 				lexical,
 				status,
 				visibility: metadata.post_access,
 				featured: metadata.featured,
-				slug
+				slug,
+				custom_excerpt: (metadata.excerpt || '').slice(0, 300) || null,
+				feature_image: metadata.feature_image || coverImageUrl || null,
+				tags: metadata.tags.map(name => ({ name }))
 			};
 
 			// Add published_at only when scheduling (future date).
@@ -297,16 +302,6 @@ export class SyncEngine {
 			// real publication timestamp with the original scheduling date.
 			if (publishedAt) {
 				postData.published_at = publishedAt;
-			}
-
-			// Add optional fields — send null to explicitly clear values in Ghost.
-			// NOTE: the writable excerpt field in the Ghost Admin API is
-			// `custom_excerpt` (max 300 chars); `excerpt` is read-only and sending a
-			// non-empty value to it triggers a validation error.
-			postData.custom_excerpt = (metadata.excerpt || '').slice(0, 300) || null;
-			postData.feature_image = metadata.feature_image || coverImageUrl || null;
-			if (metadata.tags.length > 0) {
-				postData.tags = metadata.tags.map(name => ({ name }));
 			}
 
 			// Debug logging
@@ -343,15 +338,27 @@ export class SyncEngine {
 			}
 
 			let ghostPost: GhostPost;
+			let outcomeMessage = `Synced: ${title}`;
 			if (targetId) {
 				// Update existing post (matched by ghost_id or adopted via slug)
 				console.debug(`[Ghost Sync] Updating post ${targetId}`);
-				ghostPost = await this.ghostClient.updatePost(targetId, postData);
+				const updateResult = await this.ghostClient.updatePost(targetId, postData);
+				ghostPost = updateResult.post;
+				const blogName = this.activeBlogName || ghostHostname(this.activeBaseUrl) || 'Ghost';
 				if (this.settings.showSyncNotifications) {
-					const label = this.activeBlogName ? `blog ${this.activeBlogName}` : 'in ghost';
-					new Notice(`Updated ${label}: ${title}`);
+					if (updateResult.changed) {
+						const label = this.activeBlogName ? `blog ${this.activeBlogName}` : 'in ghost';
+						new Notice(`Updated ${label}: ${title}`);
+					} else {
+						new Notice(`Unchanged ${file.basename} in blog ${blogName}`);
+					}
 				}
-				console.debug(`[Ghost Sync] Updated: ${title}`);
+				if (updateResult.changed) {
+					console.debug(`[Ghost Sync] Updated: ${title}`);
+				} else {
+					outcomeMessage = `Unchanged ${file.basename} in blog ${blogName}`;
+					console.debug(`[Ghost Sync] ${outcomeMessage}`);
+				}
 
 				// Persist identifiers back to frontmatter. After adopting a post by
 				// slug (no ghost_id yet) record the id; for a published or scheduled
@@ -419,7 +426,7 @@ export class SyncEngine {
 			// Update last sync time
 			this.settings.lastSync = Date.now();
 
-			this.onStatusChange?.('success', `Synced: ${title}`);
+			this.onStatusChange?.('success', outcomeMessage);
 			return true;
 		} catch (error) {
 			console.error(`[Ghost Sync] Error syncing ${file.path}:`, error);

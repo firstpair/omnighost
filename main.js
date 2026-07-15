@@ -87,7 +87,68 @@ var TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
 var MAX_UPLOAD_IMAGE_DIMENSION = 2400;
 var MIN_UPLOAD_IMAGE_DIMENSION = 1200;
 var COMPRESSIBLE_IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/webp"]);
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function jsonValuesEqual(left, right) {
+  if (Object.is(left, right))
+    return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length)
+      return false;
+    return left.every((value, index) => jsonValuesEqual(value, right[index]));
+  }
+  if (!isRecord(left) || !isRecord(right))
+    return false;
+  const leftKeys = Object.keys(left);
+  const rightKeys = Object.keys(right);
+  if (leftKeys.length !== rightKeys.length)
+    return false;
+  return leftKeys.every((key) => key in right && jsonValuesEqual(left[key], right[key]));
+}
+function lexicalDocumentsEqual(left, right) {
+  if (left === right)
+    return true;
+  try {
+    return jsonValuesEqual(JSON.parse(left), JSON.parse(right));
+  } catch (e) {
+    return false;
+  }
+}
+function timestampsEqual(left, right) {
+  if (left === right)
+    return true;
+  if (left === null || right === null)
+    return false;
+  return Date.parse(left) === Date.parse(right);
+}
 var GhostAPIClient = class {
+  postMatchesUpdate(current, requested) {
+    var _a, _b, _c;
+    if (current.title !== requested.title)
+      return false;
+    if (!lexicalDocumentsEqual(current.lexical, requested.lexical))
+      return false;
+    if (current.status !== requested.status)
+      return false;
+    if (current.visibility !== requested.visibility)
+      return false;
+    if (current.featured !== requested.featured)
+      return false;
+    if (current.slug !== requested.slug)
+      return false;
+    if (((_a = current.custom_excerpt) != null ? _a : null) !== requested.custom_excerpt)
+      return false;
+    if (((_b = current.feature_image) != null ? _b : null) !== requested.feature_image)
+      return false;
+    if (requested.published_at !== void 0 && !timestampsEqual(current.published_at, requested.published_at))
+      return false;
+    const currentNames = ((_c = current.tags) != null ? _c : []).map((tag) => tag.name);
+    const requestedNames = requested.tags.map((tag) => tag.name);
+    if (!jsonValuesEqual(currentNames, requestedNames))
+      return false;
+    return true;
+  }
   constructor(ghostUrl, apiKey, app) {
     this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
     this.apiKey = apiKey;
@@ -478,19 +539,23 @@ Content-Type: ${upload.mimeType}\r
   async updatePost(postId, post) {
     try {
       const currentPost = await this.getPost(postId);
+      if (this.postMatchesUpdate(currentPost, post)) {
+        console.debug(`[Ghost API] Post ${postId} is unchanged; skipping update`);
+        return { post: currentPost, changed: false };
+      }
       const postWithVersion = {
         ...post,
         updated_at: currentPost.updated_at
       };
       console.debug("[Ghost API] Sending update with fields:", Object.keys(postWithVersion));
-      console.debug("[Ghost API] Excerpt value:", postWithVersion.excerpt);
+      console.debug("[Ghost API] Excerpt value:", postWithVersion.custom_excerpt);
       console.debug("[Ghost API] Full post data:", JSON.stringify(postWithVersion, null, 2).substring(0, 500));
       const response = await this.makeRequest(`/posts/${postId}/`, "PUT", { posts: [postWithVersion] });
       if (response.status !== 200) {
         throw new Error(`Failed to update post: ${response.status} ${response.text}`);
       }
       const data = response.json;
-      return data.posts[0];
+      return { post: data.posts[0], changed: true };
     } catch (error) {
       console.error("Error updating post:", error);
       throw error;
@@ -1713,15 +1778,13 @@ ${bodyMarkdown}`;
         status,
         visibility: metadata.post_access,
         featured: metadata.featured,
-        slug
+        slug,
+        custom_excerpt: (metadata.excerpt || "").slice(0, 300) || null,
+        feature_image: metadata.feature_image || coverImageUrl || null,
+        tags: metadata.tags.map((name) => ({ name }))
       };
       if (publishedAt) {
         postData.published_at = publishedAt;
-      }
-      postData.custom_excerpt = (metadata.excerpt || "").slice(0, 300) || null;
-      postData.feature_image = metadata.feature_image || coverImageUrl || null;
-      if (metadata.tags.length > 0) {
-        postData.tags = metadata.tags.map((name) => ({ name }));
       }
       console.debug("[Ghost Sync] Post data to send:", {
         title,
@@ -1744,14 +1807,26 @@ ${bodyMarkdown}`;
         }
       }
       let ghostPost;
+      let outcomeMessage = `Synced: ${title}`;
       if (targetId) {
         console.debug(`[Ghost Sync] Updating post ${targetId}`);
-        ghostPost = await this.ghostClient.updatePost(targetId, postData);
+        const updateResult = await this.ghostClient.updatePost(targetId, postData);
+        ghostPost = updateResult.post;
+        const blogName = this.activeBlogName || ghostHostname(this.activeBaseUrl) || "Ghost";
         if (this.settings.showSyncNotifications) {
-          const label = this.activeBlogName ? `blog ${this.activeBlogName}` : "in ghost";
-          new import_obsidian4.Notice(`Updated ${label}: ${title}`);
+          if (updateResult.changed) {
+            const label = this.activeBlogName ? `blog ${this.activeBlogName}` : "in ghost";
+            new import_obsidian4.Notice(`Updated ${label}: ${title}`);
+          } else {
+            new import_obsidian4.Notice(`Unchanged ${file.basename} in blog ${blogName}`);
+          }
         }
-        console.debug(`[Ghost Sync] Updated: ${title}`);
+        if (updateResult.changed) {
+          console.debug(`[Ghost Sync] Updated: ${title}`);
+        } else {
+          outcomeMessage = `Unchanged ${file.basename} in blog ${blogName}`;
+          console.debug(`[Ghost Sync] ${outcomeMessage}`);
+        }
         const publicUrl = status === "published" || status === "scheduled" ? ghostPost.url || void 0 : void 0;
         const ownsClean = !resolvedGhostId || resolvedGhostId === targetId;
         const needsId = !resolvedGhostId;
@@ -1799,7 +1874,7 @@ ${bodyMarkdown}`;
         await this.app.vault.process(file, (raw) => updateSecondaryTitle(raw, title, primarySource));
       }
       this.settings.lastSync = Date.now();
-      (_e = this.onStatusChange) == null ? void 0 : _e.call(this, "success", `Synced: ${title}`);
+      (_e = this.onStatusChange) == null ? void 0 : _e.call(this, "success", outcomeMessage);
       return true;
     } catch (error) {
       console.error(`[Ghost Sync] Error syncing ${file.path}:`, error);

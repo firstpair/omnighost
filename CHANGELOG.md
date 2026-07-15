@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Syncing a note whose Ghost post already matches now skips the update and reports `Unchanged <note name> in blog <blog name>`.
+
 ## [0.10.0] - 2026-06-30 — Márquez
 
 ### Added

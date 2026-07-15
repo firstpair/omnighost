@@ -95,9 +95,24 @@ export interface GhostPost {
 	featured: boolean;
 	feature_image: string | null;
 	excerpt: string | null;
+	custom_excerpt?: string | null;
 	tags: Array<{ name: string }>;
 	published_at: string | null;
 	updated_at: string;
 	created_at: string;
 	url?: string; // public URL of the post (returned by the Ghost Admin API)
+}
+
+/** Fields Omnighost manages when creating or updating a Ghost post. */
+export interface GhostPostWrite {
+	title: string;
+	lexical: string;
+	status: GhostPostStatus;
+	visibility: GhostPostAccess;
+	featured: boolean;
+	slug: string;
+	custom_excerpt: string | null;
+	feature_image: string | null;
+	tags: Array<{ name: string }>;
+	published_at?: string;
 }
