@@ -3,10 +3,15 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
-vault_path="${OMNIGHOST_VAULT:-/Users/alexy/Documents/epaolo}"
+vault_path="${OMNIGHOST_VAULT:-/Users/alexy/vaults/epaolo}"
 plugin_dir="$vault_path/.obsidian/plugins/omnighost"
 
 cd "$repo_root"
+
+if [[ ! -d "$vault_path/.obsidian" ]]; then
+	echo "Obsidian vault not found (missing .obsidian): $vault_path" >&2
+	exit 1
+fi
 
 npm run build
 

@@ -100,8 +100,8 @@ Use this when the user asks to bump Omnighost, update the local Obsidian plugin,
 Findings from the 2026-07-08 desktop/iOS sync debug:
 
 - The active repo is `/Users/alexy/src/omnighost`.
-- The local epaolo vault is `/Users/alexy/Documents/epaolo`.
-- The installed plugin folder is `/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost`.
+- The local epaolo vault is `/Users/alexy/vaults/epaolo`.
+- The installed plugin folder is `/Users/alexy/vaults/epaolo/.obsidian/plugins/omnighost`.
 - The three runtime files Obsidian needs are `main.js`, `styles.css`, and `manifest.json`.
 - Git history showed `0.12.0` as the latest tag, so the YAML hotfix was bumped to `0.12.1`.
 - `manifest.json`, `package.json`, `package-lock.json`, and `versions.json` must stay in sync when bumping a release version.
@@ -168,13 +168,13 @@ scripts/install-epaolo-plugin.sh
 Post-copy verification should compare the repo and vault hashes for all three runtime files and confirm the installed manifest version:
 
 ```bash
-plugin_dir=/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost
+plugin_dir=/Users/alexy/vaults/epaolo/.obsidian/plugins/omnighost
 for file in main.js styles.css manifest.json; do
   shasum -a 256 "$file" "$plugin_dir/$file"
 done
 python3 - <<'PY'
 import json
-print(json.load(open('/Users/alexy/Documents/epaolo/.obsidian/plugins/omnighost/manifest.json'))['version'])
+print(json.load(open('/Users/alexy/vaults/epaolo/.obsidian/plugins/omnighost/manifest.json'))['version'])
 PY
 ```
 
