@@ -16,6 +16,8 @@ export interface GhostBlog {
 
 export type TitlePrimarySource = 'metadata' | 'heading';
 
+export type PublicationProvenanceVisibility = 'visible-hash' | 'visible-credit' | 'hidden';
+
 /**
  * Plugin settings interface
  * Note: ghostAdminApiKey is stored securely in Obsidian's Secrets (Keychain)
@@ -35,6 +37,8 @@ export interface GhostWriterSettings {
 	autoImportTextpacks: boolean; // import .textpack files that appear in the vault
 	syncTitleSource: TitlePrimarySource; // which title source is sent to Ghost
 	syncUpdateSecondaryTitle: boolean; // update the non-primary title slot on sync
+	publicationProvenanceVisibility: PublicationProvenanceVisibility;
+	verifyGhostContentOnSync: boolean;
 	yamlPrefix: string;
 	lastSync: number;
 	showSyncNotifications: boolean;
@@ -59,6 +63,8 @@ export const DEFAULT_SETTINGS: GhostWriterSettings = {
 	autoImportTextpacks: true,
 	syncTitleSource: 'metadata',
 	syncUpdateSecondaryTitle: false,
+	publicationProvenanceVisibility: 'visible-hash',
+	verifyGhostContentOnSync: true,
 	yamlPrefix: 'ghost_',
 	lastSync: 0,
 	showSyncNotifications: true,
@@ -96,6 +102,7 @@ export interface GhostPost {
 	feature_image: string | null;
 	excerpt: string | null;
 	custom_excerpt?: string | null;
+	codeinjection_head?: string | null;
 	tags: Array<{ name: string }>;
 	published_at: string | null;
 	updated_at: string;
@@ -114,5 +121,6 @@ export interface GhostPostWrite {
 	custom_excerpt: string | null;
 	feature_image: string | null;
 	tags: Array<{ name: string }>;
+	codeinjection_head: string | null;
 	published_at?: string;
 }

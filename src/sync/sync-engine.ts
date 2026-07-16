@@ -8,6 +8,8 @@ import { markdownToLexical } from '../converters/markdown-to-lexical';
 import { processPostImages } from '../ghost/image-uploader';
 import { buildGhostEditorUrl, ghostHostname, normalizeGhostSiteUrl } from '../ghost/url';
 import { analyzeTitleSources, resolvePrimaryTitle, updateSecondaryTitle } from '../title-policy';
+import { preparePublicationProvenance, stripRenderedPublicationProvenanceHtml } from '../versioning/publication-provenance';
+import type { NoteVersionResult } from '../versioning/note-version';
 
 /**
  * Sync Engine - Handles synchronization from Obsidian to Ghost
@@ -109,7 +111,7 @@ export class SyncEngine {
 		// Replace the body with the Ghost post content (HTML → Markdown).
 		// Note: Ghost stores Lexical; this conversion is a close approximation.
 		const title = post.title || 'Untitled Post';
-		const bodyMarkdown = htmlToMarkdown(post.html ?? '');
+		const bodyMarkdown = htmlToMarkdown(stripRenderedPublicationProvenanceHtml(post.html ?? ''));
 		await this.app.vault.process(file, (raw) => {
 			const content = upsertGhostMetadata(raw, ghostFields, prefix);
 			const parsed = splitFrontmatter(content);
@@ -127,32 +129,22 @@ export class SyncEngine {
 	/**
 	 * Sync a single file to Ghost
 	 */
-	async syncFileToGhost(file: TFile): Promise<boolean> {
+	async syncFileToGhost(
+		file: TFile,
+		noteVersion?: NoteVersionResult,
+		sourceContent?: string,
+		expectedAssetSha256?: ReadonlyMap<string, string>
+	): Promise<boolean> {
 		this.lastSyncedPost = null;
 		try {
 			// Read file content
-			const content = await this.app.vault.read(file);
+			const hasFrozenSource = sourceContent !== undefined;
+			const content = sourceContent ?? await this.app.vault.read(file);
 
-			// Parse frontmatter - need to wait for cache to be ready
-			let cache = this.app.metadataCache.getFileCache(file);
-
-			// If cache is not ready, wait a bit
-			if (!cache) {
-				await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
-				cache = this.app.metadataCache.getFileCache(file);
-			}
-
-			if (!cache?.frontmatter) {
-				// Silently skip files without frontmatter (not an error)
-				return false;
-			}
-
-			// Combine the on-disk frontmatter with the metadata cache. The cache
-			// reflects edits made in the Properties UI immediately (which can happen
-			// before the file is flushed to disk on mobile), so it wins for the fields
-			// it has; the on-disk frontmatter fills in anything the cache lacks (e.g.
-			// right after a plugin reload, which also recovers `ghost_id`). This makes
-			// frontmatter-only changes take effect on sync without a body edit.
+			// A caller-provided source is a frozen publication snapshot: its body and
+			// frontmatter must stay paired with the Git commit made for those bytes.
+			// Without a frozen source, merge in the metadata cache so Properties edits
+			// that have not yet flushed to disk still take effect on direct engine use.
 			let diskFm: Record<string, unknown> = {};
 			const fmParsed = splitFrontmatter(content);
 			if (fmParsed) {
@@ -164,8 +156,16 @@ export class SyncEngine {
 					throw new Error('Frontmatter YAML is invalid. Fix the red properties before syncing.');
 				}
 			}
-			const cacheFm = (cache.frontmatter ?? {}) as Record<string, unknown>;
-			const frontmatterObj: Record<string, unknown> = { ...diskFm, ...cacheFm };
+			let frontmatterObj = diskFm;
+			if (!hasFrozenSource) {
+				let cache = this.app.metadataCache.getFileCache(file);
+				if (!cache) {
+					await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
+					cache = this.app.metadataCache.getFileCache(file);
+				}
+				const cacheFm = (cache?.frontmatter ?? {}) as Record<string, unknown>;
+				frontmatterObj = { ...diskFm, ...cacheFm };
+			}
 
 			const metadata = parseGhostMetadata(frontmatterObj, this.settings.yamlPrefix);
 			if (!metadata) {
@@ -212,7 +212,8 @@ export class SyncEngine {
 				baseMarkdown,
 				file,
 				swallowCover,
-				this.imageCache
+				this.imageCache,
+				expectedAssetSha256
 			);
 			if (cacheUpdated) {
 				await this.saveImageCache?.();
@@ -294,7 +295,8 @@ export class SyncEngine {
 				slug,
 				custom_excerpt: (metadata.excerpt || '').slice(0, 300) || null,
 				feature_image: metadata.feature_image || coverImageUrl || null,
-				tags: metadata.tags.map(name => ({ name }))
+				tags: metadata.tags.map(name => ({ name })),
+				codeinjection_head: null
 			};
 
 			// Add published_at only when scheduling (future date).
@@ -303,6 +305,16 @@ export class SyncEngine {
 			if (publishedAt) {
 				postData.published_at = publishedAt;
 			}
+
+			const preparedProvenance = await preparePublicationProvenance(
+				postData,
+				status === 'draft' ? 'hidden' : this.settings.publicationProvenanceVisibility,
+				noteVersion?.kind === 'git'
+					? { gitCommit: noteVersion.commit }
+					: {}
+			);
+			postData.lexical = preparedProvenance.lexical;
+			postData.codeinjection_head = preparedProvenance.hiddenBlock;
 
 			// Debug logging
 			console.debug('[Ghost Sync] Post data to send:', {
@@ -342,7 +354,13 @@ export class SyncEngine {
 			if (targetId) {
 				// Update existing post (matched by ghost_id or adopted via slug)
 				console.debug(`[Ghost Sync] Updating post ${targetId}`);
-				const updateResult = await this.ghostClient.updatePost(targetId, postData);
+				const updateResult = await this.ghostClient.updatePost(targetId, postData, {
+					visibility: status === 'draft' ? 'hidden' : this.settings.publicationProvenanceVisibility,
+					verifyRemoteContent: this.settings.verifyGhostContentOnSync,
+					allowedExistingGitCommit: noteVersion?.kind === 'git'
+						? noteVersion.previousNoteCommit
+						: undefined
+				});
 				ghostPost = updateResult.post;
 				const blogName = this.activeBlogName || ghostHostname(this.activeBaseUrl) || 'Ghost';
 				if (this.settings.showSyncNotifications) {

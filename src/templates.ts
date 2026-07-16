@@ -44,7 +44,7 @@ Write your members-only content here...
 export function hasGhostProperties(content: string, prefix: string): boolean {
 	// Escape special regex characters in prefix
 	const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const ghostPropertyPattern = new RegExp(`^${escapedPrefix}(post_access|published|published_at|featured|tags|excerpt|feature_image|no_sync|id|slug):`, 'm');
+	const ghostPropertyPattern = new RegExp(`^${escapedPrefix}(post_access|published|published_at|featured|tags|excerpt|feature_image|cover_from_first_image|no_sync|id|slug):`, 'm');
 	return ghostPropertyPattern.test(content);
 }
 
@@ -54,7 +54,7 @@ export function hasGhostProperties(content: string, prefix: string): boolean {
  */
 export function findGhostPropertyPrefixes(content: string): string[] {
 	const prefixes = new Set<string>();
-	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'no_sync', 'id', 'slug'];
+	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'id', 'slug'];
 	const lines = content.split('\n');
 
 	for (const line of lines) {
@@ -91,7 +91,7 @@ export function extractFrontmatter(content: string): { frontmatter: string; body
  * Remove Ghost properties with old prefixes from frontmatter
  */
 export function removeOldGhostProperties(frontmatter: string, currentPrefix: string): string {
-	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'no_sync', 'id', 'slug'];
+	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'id', 'slug'];
 	const lines = frontmatter.split('\n');
 	const filteredLines: string[] = [];
 
@@ -125,7 +125,7 @@ export function removeOldGhostProperties(frontmatter: string, currentPrefix: str
  * Get list of missing Ghost properties
  */
 function getMissingGhostProperties(frontmatter: string, prefix: string): string[] {
-	const allGhostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'no_sync'];
+	const allGhostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync'];
 	const lines = frontmatter.split('\n');
 	const existingKeys = new Set<string>();
 
@@ -179,6 +179,7 @@ export function addGhostPropertiesToContent(content: string, settings: GhostWrit
 			'tags': '[]',
 			'excerpt': '""',
 			'feature_image': '""',
+			'cover_from_first_image': 'false',
 			'no_sync': 'false'
 		};
 
@@ -201,6 +202,7 @@ ${prefix}featured: false
 ${prefix}tags: []
 ${prefix}excerpt: ""
 ${prefix}feature_image: ""
+${prefix}cover_from_first_image: false
 ${prefix}no_sync: false`;
 
 		return `---

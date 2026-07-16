@@ -101,7 +101,8 @@ export async function processPostImages(
 	markdown: string,
 	file: TFile,
 	swallowCover: boolean,
-	cache: Record<string, string>
+	cache: Record<string, string>,
+	expectedAssetSha256?: ReadonlyMap<string, string>
 ): Promise<ProcessedImages> {
 	const refs = findImageRefs(markdown);
 	if (refs.length === 0) {
@@ -117,11 +118,20 @@ export async function processPostImages(
 		if (isRemote(ref.target) || urlByTarget.has(ref.target)) continue;
 		const tfile = resolveFile(app, ref.target, file.path);
 		if (!tfile) {
+			if (expectedAssetSha256) {
+				throw new Error(`Imported textpack asset is unavailable: ${ref.target}`);
+			}
 			console.warn(`[Ghost Images] Could not resolve image in vault: ${ref.target}`);
 			continue;
 		}
 		const data = await app.vault.readBinary(tfile);
 		const hash = await sha256Hex(data);
+		if (expectedAssetSha256) {
+			const expected = expectedAssetSha256.get(tfile.path);
+			if (!expected || hash !== expected) {
+				throw new Error(`Imported textpack asset changed while preparing publication: ${tfile.path}`);
+			}
+		}
 		let url = cache[hash];
 		if (url) {
 			console.debug(`[Ghost Images] Reusing cached upload for ${ref.target} -> ${url}`);

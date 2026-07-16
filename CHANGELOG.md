@@ -7,8 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Publication provenance records a canonical SHA-256 and optional source-note Git commit in hidden per-post Ghost metadata.
+- A three-mode setting can show the version and Omnighost credit, show only the linked credit, or keep the entire provenance block hidden.
+- Desktop publishing commits the source note when Git is available; mobile and unavailable/unsafe Git states fall back to the direct publication hash.
+- Textpack creation safely commits the source Markdown and referenced assets, embeds validated Git/payload provenance, and lets an untouched imported note carry that source Git version through publication.
+
 ### Changed
 - Syncing a note whose Ghost post already matches now skips the update and reports `Unchanged <note name> in blog <blog name>`.
+- Stored publication hashes provide the optional fast no-op path. An enabled-by-default direct-verification toggle keeps the managed-field comparison as protection against edits made directly in Ghost.
+- Textpack source inheritance survives publishing controls and Ghost id/URL write-backs, but authorial metadata, body, or imported-asset edits invalidate it and fall back to normal note versioning.
 
 ## [0.10.0] - 2026-06-30 — Márquez
 

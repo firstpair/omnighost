@@ -15,6 +15,7 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 - 🖼️ **Image publishing** — local images (`![](…)` and `![[…]]` embeds) are uploaded to Ghost and references rewritten to the hosted URLs
 - 🎚️ **Cover-image trick** — opt in per note to make the first image the post cover and remove it from the body
 - ⚡ **Content-hash image cache** — unchanged images are never re-uploaded across syncs
+- 🧾 **Publication provenance** — published posts carry a reproducible SHA-256 and optional Git version, with configurable visible credit
 - 📱 **Desktop and iOS** — works in the Obsidian mobile WebView (no Node `Buffer`/`FormData`; JWT signing via Web Crypto, multipart built by hand)
 - 📅 **Editorial calendar** — sidebar view of all scheduled and published posts for the month
 - 📝 **YAML frontmatter control** — manage all Ghost metadata directly in Obsidian
@@ -98,6 +99,8 @@ BRAT will keep it updated as new releases are published.
    - **Folder** — vault folder for that blog's posts (default: `Ghost Posts`)
    - **Auto-sync this folder** — per-blog automatic sync toggle
    - **Sync interval** — optional per-blog interval; blank uses the global interval
+   - **Publication provenance** — show version + credit, credit only, or keep provenance hidden
+   - **Verify published content directly** — detect edits made directly in Ghost even when its stored publication hash still matches
    - **YAML prefix** — prefix for Ghost metadata fields (default in current builds: `ghost_`; many older examples use `g_`)
 3. Click **Save key** in each blog block. Omnighost stores the key and immediately tests the connection.
 
@@ -111,6 +114,22 @@ Legacy single-blog settings are migrated into the first blog automatically. If t
 - In multi-blog notes, each target blog gets its own keys, such as `ghost_id_example_com`, `ghost_url_example_com`, and `ghost_public_url_example_com`. The suffix is based on the blog domain so renaming a blog does not break links.
 - To adopt a post that already exists on Ghost (e.g., created elsewhere) without making a duplicate, set its slug explicitly with **`ghost_slug`** or **`g_slug`** — Omnighost will find that post by slug and update it in place, then record the blog-specific id.
 - Notes with only an auto-derived (title-based) slug always **create** — so a title collision can never silently overwrite an unrelated post.
+
+### Publication provenance and unchanged posts
+
+Every outbound post gets a canonical publication SHA-256 stored as hidden per-post Ghost metadata. The digest covers the managed title, body, status, visibility, featured flag, slug, excerpt, feature image, ordered tags, and scheduled time. It is computed from the final Ghost-ready Lexical publication rather than raw Markdown, so Omnighost can reproduce the same digest from either the publication produced from the note or the fetched Ghost post. Uploaded image URLs and other blog-specific output can therefore give the same source note a different digest on different blogs.
+
+On desktop, publishing a note also commits that note to its nearest Git repository when Git is available and the note has changed. Omnighost commits only the note and never pushes. If the note is already clean, it records the latest commit that touched that file. When the next note commit produces the same publication digest, Omnighost retains the prior published Git version, so the first re-sync does not rotate it. On mobile, outside a Git repository, or when Git cannot commit safely, publishing continues with the direct SHA-256.
+
+Textpacks preserve the earlier source version across the handoff. Before `scripts/textpack.py` writes a pack, it safely commits the source Markdown and every referenced local image, without including unrelated staged changes or pushing. The pack carries that commit plus a portable payload SHA-256. Import verifies the payload, records the source version in the note, and fingerprints the imported authorial metadata, body, and asset bytes. Changing only publish/schedule toggles, blog routing, or Ghost id/URL write-backs keeps the inherited version valid; changing the title, body, slug, tags, excerpt, access, feature settings, or an imported asset invalidates it and returns to normal note versioning. Thus an untouched imported note publishes with the textpack's Git version and its next sync reports `Unchanged`. If Git was unavailable or unsafe while building the pack, import still verifies the payload and publication uses the directly comparable publication SHA-256. This is an integrity check, not a signature: a pack's claimed Git commit is self-attested and should not be treated as proof that it came from a trusted repository.
+
+The **Publication provenance** setting controls the final reader-facing line:
+
+- **Visible version and credit** — `published with omnighost`, the Git version when available, and the publication SHA-256
+- **Visible credit only** — linked `published with omnighost` text; version details remain hidden
+- **Hidden provenance** — no reader-facing line; version details remain in Ghost's per-post code-injection metadata
+
+The hidden metadata is non-visible, not secret or cryptographically signed: it can still be inspected and edited in Ghost or page source. **Verify published content directly** is enabled by default and retains the managed-field comparison as a safeguard against edits made directly in Ghost without updating the embedded hash. Turning it off trusts the stored provenance for a faster check, so manual Ghost edits can be missed until direct verification is enabled again.
 
 ### Multiple blogs and selective sync
 
@@ -133,6 +152,10 @@ If you remove a blog from a note's blog list after it has already published ther
 Run **Normalize blog references (use domain keys)** to rewrite existing blog references and per-blog id/public URL keys to stable domain-based keys without changing their values.
 
 For one-note exclusions, set `ghost_no_sync: true` / `g_no_sync: true`. For folder-level selective sync, turn off **Auto-sync this folder** on a blog; manual sync still works.
+
+### Importing textpacks
+
+Run **Import textpack** or save a `.textpack` inside the vault for automatic import. Markdown, local images, blog, slug, title, tags, and excerpt travel together. Packs made by `scripts/textpack.py` also carry validated Git/payload provenance as described above, so an untouched source version survives a desktop-to-mobile import and publish cycle.
 
 ### Importing from Ghost
 

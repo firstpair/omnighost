@@ -1,6 +1,17 @@
 import { App, requestUrl, RequestUrlResponse } from 'obsidian';
 import { GhostPost, GhostPostWrite } from '../types';
 import { normalizeGhostSiteUrl } from './url';
+import {
+	compareManagedPublicationState,
+	extractHiddenPublicationProvenance,
+	extractTrailingVisiblePublicationProvenance,
+	mergeHiddenPublicationProvenance,
+	preparePublicationProvenance,
+	publicationLexicalDocumentsEqual,
+	selectPublicationVersion,
+	storedPublicationProvenanceMatches
+} from '../versioning/publication-provenance';
+import type { PublicationProvenanceVisibility } from '../versioning/publication-provenance';
 
 const LARGE_IMAGE_THRESHOLD_BYTES = 3.5 * 1024 * 1024;
 const TARGET_IMAGE_BYTES = 2.5 * 1024 * 1024;
@@ -11,6 +22,12 @@ const COMPRESSIBLE_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp
 export interface GhostPostUpdateResult {
 	post: GhostPost;
 	changed: boolean;
+}
+
+export interface GhostPostUpdateOptions {
+	visibility: PublicationProvenanceVisibility;
+	verifyRemoteContent: boolean;
+	allowedExistingGitCommit?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -28,15 +45,6 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
 	const rightKeys = Object.keys(right);
 	if (leftKeys.length !== rightKeys.length) return false;
 	return leftKeys.every(key => key in right && jsonValuesEqual(left[key], right[key]));
-}
-
-function lexicalDocumentsEqual(left: string, right: string): boolean {
-	if (left === right) return true;
-	try {
-		return jsonValuesEqual(JSON.parse(left) as unknown, JSON.parse(right) as unknown);
-	} catch {
-		return false;
-	}
 }
 
 function timestampsEqual(left: string | null, right: string | null): boolean {
@@ -63,13 +71,14 @@ export class GhostAPIClient {
 
 	private postMatchesUpdate(current: GhostPost, requested: GhostPostWrite): boolean {
 		if (current.title !== requested.title) return false;
-		if (!lexicalDocumentsEqual(current.lexical, requested.lexical)) return false;
+		if (!publicationLexicalDocumentsEqual(current.lexical, requested.lexical)) return false;
 		if (current.status !== requested.status) return false;
 		if (current.visibility !== requested.visibility) return false;
 		if (current.featured !== requested.featured) return false;
 		if (current.slug !== requested.slug) return false;
 		if ((current.custom_excerpt ?? null) !== requested.custom_excerpt) return false;
 		if ((current.feature_image ?? null) !== requested.feature_image) return false;
+		if ((current.codeinjection_head ?? null) !== requested.codeinjection_head) return false;
 		if (requested.published_at !== undefined && !timestampsEqual(current.published_at, requested.published_at)) return false;
 		const currentNames = (current.tags ?? []).map(tag => tag.name);
 		const requestedNames = requested.tags.map(tag => tag.name);
@@ -534,18 +543,74 @@ export class GhostAPIClient {
 	/**
 	 * Update an existing post
 	 */
-	async updatePost(postId: string, post: GhostPostWrite): Promise<GhostPostUpdateResult> {
+	async updatePost(
+		postId: string,
+		post: GhostPostWrite,
+		options: GhostPostUpdateOptions = { visibility: 'visible-hash', verifyRemoteContent: true }
+	): Promise<GhostPostUpdateResult> {
 		try {
 			// First, get the current post to retrieve updated_at
 			const currentPost = await this.getPost(postId);
-			if (this.postMatchesUpdate(currentPost, post)) {
+			const initialProvenance = extractHiddenPublicationProvenance(post.codeinjection_head);
+			if (!initialProvenance) {
+				throw new Error('Outbound post is missing valid Omnighost publication provenance');
+			}
+			// Recompute the outbound digest before it participates in Git-version
+			// selection; the caller's embedded block is transport, not authority.
+			const canonicalOutbound = await preparePublicationProvenance(post, options.visibility, {
+				gitCommit: initialProvenance.gitCommit
+			});
+			const version = selectPublicationVersion(canonicalOutbound.provenance, currentPost.codeinjection_head, {
+				allowedExistingGitCommit: options.allowedExistingGitCommit,
+				currentVisible: extractTrailingVisiblePublicationProvenance(currentPost.lexical)
+			});
+			let requestedPost: GhostPostWrite;
+			let unchanged: boolean;
+			let embeddedDigestIsStale = false;
+
+			if (options.verifyRemoteContent) {
+				const comparison = await compareManagedPublicationState({
+					desired: post,
+					current: currentPost,
+					currentCodeInjectionHead: currentPost.codeinjection_head,
+					visibility: options.visibility,
+					gitCommit: version.gitCommit
+				});
+				requestedPost = {
+					...post,
+					lexical: comparison.desired.lexical,
+					codeinjection_head: comparison.desiredCodeInjectionHead
+				};
+				unchanged = comparison.unchanged && this.postMatchesUpdate(currentPost, requestedPost);
+				embeddedDigestIsStale = comparison.embeddedDigestIsStale;
+			} else {
+				const desired = await preparePublicationProvenance(post, options.visibility, version);
+				requestedPost = {
+					...post,
+					lexical: desired.lexical,
+					codeinjection_head: mergeHiddenPublicationProvenance(
+						currentPost.codeinjection_head,
+						desired.provenance
+					)
+				};
+				unchanged = storedPublicationProvenanceMatches(
+					currentPost.lexical,
+					currentPost.codeinjection_head,
+					requestedPost.lexical,
+					requestedPost.codeinjection_head
+				);
+			}
+			if (unchanged) {
 				console.debug(`[Ghost API] Post ${postId} is unchanged; skipping update`);
 				return { post: currentPost, changed: false };
+			}
+			if (embeddedDigestIsStale) {
+				console.debug(`[Ghost API] Post ${postId} changed in Ghost; embedded publication hash is stale`);
 			}
 
 			// Include updated_at from current post for version control
 			const postWithVersion = {
-				...post,
+				...requestedPost,
 				updated_at: currentPost.updated_at
 			};
 

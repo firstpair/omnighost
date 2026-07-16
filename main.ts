@@ -1,5 +1,5 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TAbstractFile, TFolder, normalizePath, debounce, Modal, ButtonComponent, parseYaml, stringifyYaml, setIcon } from 'obsidian';
-import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog, TitlePrimarySource } from './src/types';
+import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TAbstractFile, TFolder, MarkdownView, normalizePath, debounce, Modal, ButtonComponent, parseYaml, stringifyYaml, setIcon } from 'obsidian';
+import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog, TitlePrimarySource, PublicationProvenanceVisibility } from './src/types';
 import { GhostAPIClient } from './src/ghost/api-client';
 import { generateNewPostTemplate, addGhostPropertiesToContent } from './src/templates';
 import { SyncEngine } from './src/sync/sync-engine';
@@ -16,6 +16,17 @@ import { analyzeTextpackTitle, normalizeTextpackTitle } from './src/title-policy
 import type { TextpackTitleOptions } from './src/title-policy';
 import { paywallDecorationPlugin, paywallDeduplicateExtension } from './src/editor/paywall-decoration';
 import { buildGhostEditorUrl, ghostHostname, normalizeGhostSiteUrl } from './src/ghost/url';
+import { ensureNoteVersioned } from './src/versioning/note-version';
+import type { NoteVersionResult } from './src/versioning/note-version';
+import { stripRenderedPublicationProvenanceHtml } from './src/versioning/publication-provenance';
+import {
+	hashImportedTextpackSnapshot,
+	importedTextpackSnapshotField,
+	importedTextpackSourceFields,
+	sha256Bytes,
+	validateInheritedTextpackSource
+} from './src/versioning/textpack-source';
+import type { ImportedTextpackAsset } from './src/versioning/textpack-source';
 
 // ⚠️ IMPORTANT: Set to false before production build/release
 // Development mode flag - enables auto-sync on file changes (2s debounce)
@@ -40,6 +51,11 @@ interface BulkDeleteOptions {
 }
 
 type OrphanDecision = 'delete' | 'keep' | 'later';
+
+interface InheritedTextpackVersion {
+	noteVersion: NoteVersionResult;
+	assetSha256ByVaultPath: ReadonlyMap<string, string>;
+}
 
 export default class GhostWriterManagerPlugin extends Plugin {
 	settings: GhostWriterSettings;
@@ -754,7 +770,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			const title = post.title || 'Untitled Post';
 			const safeFileName = title.replace(/[\\/:*?"<>|]/g, '-').trim();
 			const filePath = normalizePath(`${folderPath}/${safeFileName}.md`);
-			const bodyMarkdown = htmlToMarkdown(post.html ?? '');
+			const bodyMarkdown = htmlToMarkdown(stripRenderedPublicationProvenanceHtml(post.html ?? ''));
 			const content = `---\n${stringifyYaml(fm)}---\n\n# ${title}\n\n${bodyMarkdown}`;
 
 			let finalPath = filePath;
@@ -1195,6 +1211,43 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		});
 	}
 
+	private async inheritedTextpackNoteVersion(
+		file: TFile,
+		content: string,
+		frontmatter: Record<string, unknown>,
+		prefix: string
+	): Promise<InheritedTextpackVersion | undefined> {
+		const result = await validateInheritedTextpackSource(
+			content,
+			frontmatter,
+			prefix,
+			async (relativePath) => {
+				const parent = file.parent?.path ?? '';
+				const path = normalizePath(parent ? `${parent}/${relativePath}` : relativePath);
+				const asset = this.app.vault.getAbstractFileByPath(path);
+				if (!(asset instanceof TFile)) return null;
+				return new Uint8Array(await this.app.vault.readBinary(asset));
+			}
+		);
+		if (result.kind === 'invalid') {
+			console.debug(`[Ghost Version] Ignoring inherited textpack version for ${file.path}: ${result.reason}`);
+			return undefined;
+		}
+		if (result.kind !== 'valid' || !result.source.gitCommit) return undefined;
+		const parent = file.parent?.path ?? '';
+		return {
+			noteVersion: {
+				kind: 'git',
+				commit: result.source.gitCommit,
+				createdCommit: false
+			},
+			assetSha256ByVaultPath: new Map(result.source.assets.map((asset) => [
+				normalizePath(parent ? `${parent}/${asset.name}` : asset.name),
+				asset.sha256
+			]))
+		};
+	}
+
 	/**
 	 * Sync a note to a set of blogs. All blogs are equal: each is matched by its own
 	 * stored id (g_id_<domain>, with name/alias fallbacks) else by slug, and after
@@ -1208,6 +1261,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 		const prefix = this.settings.yamlPrefix;
 
+		const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (activeView?.file?.path === file.path) {
+			await activeView.save();
+		}
 		const content0 = await this.app.vault.read(file);
 		let fmObj: Record<string, unknown> = (this.app.metadataCache.getFileCache(file)?.frontmatter ?? {}) as Record<string, unknown>;
 		const split0 = splitFrontmatter(content0);
@@ -1222,6 +1279,28 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 		}
 		const fmStr = (k: string) => typeof fmObj[k] === 'string' ? String(fmObj[k]) : '';
+		const noteMetadata = parseGhostMetadata(fmObj, prefix);
+		const hasPublishTarget = blogs.some((blog) =>
+			!!blog.url.trim() && !!this.loadApiKeyForSecret(blog.apiKeySecretName).trim()
+		);
+		let noteVersion: NoteVersionResult | undefined;
+		let inheritedAssetSha256: ReadonlyMap<string, string> | undefined;
+		if (noteMetadata?.published && !noteMetadata.no_sync && hasPublishTarget) {
+			const inherited = await this.inheritedTextpackNoteVersion(file, content0, fmObj, prefix);
+			if (inherited) {
+				noteVersion = inherited.noteVersion;
+				inheritedAssetSha256 = inherited.assetSha256ByVaultPath;
+			} else {
+				noteVersion = await ensureNoteVersioned(this.app, file, content0);
+			}
+			if (noteVersion.kind === 'unavailable') {
+				console.debug(`[Ghost Version] Using publication SHA-256 for ${file.path}: ${noteVersion.reason}`, noteVersion.detail ?? '');
+			}
+		}
+		if (await this.app.vault.read(file) !== content0) {
+			new Notice(`Cannot sync "${file.basename}": the note changed while preparing publication. Try again.`);
+			return false;
+		}
 		const hadOldMaps = `${prefix}ids` in fmObj || `${prefix}public_urls` in fmObj;
 		const hadLegacyClean = [`${prefix}id`, `${prefix}url`, `${prefix}public_url`].some(k => k in fmObj);
 
@@ -1240,7 +1319,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 			this.syncEngine.setActiveBlog(this.getClientForBlog(blog), blog.url, blog.folder, false, knownId, blog.name);
 			try {
-				ok = (await this.syncEngine.syncFileToGhost(file)) && ok;
+				ok = (await this.syncEngine.syncFileToGhost(
+					file,
+					noteVersion,
+					content0,
+					inheritedAssetSha256
+				)) && ok;
 			} catch (e) {
 				new Notice(`Sync to ${blog.name} failed: ${(e as Error).message}`);
 				ok = false;
@@ -1349,23 +1433,45 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		});
 		const title = normalizedTitle.title;
 		const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || slug;
+		if (!this.app.vault.getAbstractFileByPath(folder)) {
+			try { await this.app.vault.createFolder(folder); } catch { /* exists */ }
+		}
+
+		let importSuffix = '';
+		let collisionNumber = 0;
+		const collisionBase = `-${Date.now()}`;
+		let notePath: string;
+		let assetFolderName: string;
+		let assetDir: string;
+		while (true) {
+			notePath = normalizePath(`${folder}/${fileName}${importSuffix}.md`);
+			assetFolderName = `${slug}${importSuffix}`;
+			assetDir = normalizePath(`${folder}/assets/${assetFolderName}`);
+			const noteCollision = !!this.app.vault.getAbstractFileByPath(notePath);
+			const assetCollision = pack.assets.size > 0 && !!this.app.vault.getAbstractFileByPath(assetDir);
+			if (!noteCollision && !assetCollision) break;
+			collisionNumber++;
+			importSuffix = collisionNumber === 1 ? collisionBase : `${collisionBase}-${collisionNumber}`;
+		}
 
 		let markdown = normalizedTitle.markdown;
+		const importedAssets: ImportedTextpackAsset[] = [];
 		if (pack.assets.size > 0) {
-			const assetDir = normalizePath(`${folder}/assets/${slug}`);
-			if (!this.app.vault.getAbstractFileByPath(assetDir)) {
-				try { await this.app.vault.createFolder(assetDir); } catch { /* exists */ }
-			}
+			try { await this.app.vault.createFolder(assetDir); } catch { /* exists */ }
 			for (const [base, data] of pack.assets) {
 				const path = normalizePath(`${assetDir}/${base}`);
 				const buf = data.slice().buffer;
-				const existing = this.app.vault.getAbstractFileByPath(path);
-				if (existing instanceof TFile) await this.app.vault.modifyBinary(existing, buf);
-				else await this.app.vault.createBinary(path, buf);
+				await this.app.vault.createBinary(path, buf);
+				if (pack.sourceVersion) {
+					importedAssets.push({
+						path: `assets/${assetFolderName}/${base}`,
+						sha256: await sha256Bytes(data)
+					});
+				}
 			}
 			// Bundle refs are assets/<file>; the note lives in the blog folder, so
 			// they resolve note-relatively once scoped by slug: assets/<slug>/<file>.
-			markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${slug}/`);
+			markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${assetFolderName}/`);
 		}
 
 		let content = addGhostPropertiesToContent(markdown, this.settings);
@@ -1377,19 +1483,29 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
 		}
 		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
+		if (pack.sourceVersion) {
+			Object.assign(upserts, importedTextpackSourceFields(prefix, pack.sourceVersion, importedAssets));
+		}
 		content = upsertFrontmatterKeys(content, upserts);
+		if (pack.sourceVersion) {
+			const parsed = splitFrontmatter(content);
+			const parsedFrontmatter = parsed ? parseYaml(parsed.raw) as unknown : null;
+			if (!parsedFrontmatter || typeof parsedFrontmatter !== 'object' || Array.isArray(parsedFrontmatter)) {
+				throw new Error('Could not create textpack source fingerprint');
+			}
+			const snapshot = await hashImportedTextpackSnapshot(
+				content,
+				parsedFrontmatter as Record<string, unknown>,
+				prefix
+			);
+			content = upsertFrontmatterKeys(content, importedTextpackSnapshotField(prefix, snapshot));
+		}
 
-		if (!this.app.vault.getAbstractFileByPath(folder)) {
-			try { await this.app.vault.createFolder(folder); } catch { /* exists */ }
-		}
-		let notePath = normalizePath(`${folder}/${fileName}.md`);
-		if (this.app.vault.getAbstractFileByPath(notePath)) {
-			notePath = normalizePath(`${folder}/${fileName}-${Date.now()}.md`);
-		}
 		const file = await this.app.vault.create(notePath, content);
 		await this.app.workspace.getLeaf(false).openFile(file);
 		const imgs = pack.assets.size;
 		new Notice(`Imported "${title}" → ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? '' : 's'})` : ''}`);
+		if (pack.provenanceWarning) new Notice(pack.provenanceWarning);
 	}
 
 	/** Import one .textpack file that lives inside the vault, then trash the pack.
@@ -1491,7 +1607,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		if (post.url) fm[keys.pub] = post.url;
 		const title = post.title || 'Untitled Post';
 		const safe = title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'Untitled Post';
-		const body = htmlToMarkdown(post.html ?? '');
+		const body = htmlToMarkdown(stripRenderedPublicationProvenanceHtml(post.html ?? ''));
 		const content = `---\n${stringifyYaml(fm)}---\n\n# ${title}\n\n${body}`;
 		let path = normalizePath(`${folder}/${safe}.md`);
 		if (this.app.vault.getAbstractFileByPath(path)) {
@@ -1699,7 +1815,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					ghostFields.blog = this.blogPropertyYaml([blog]);
 				}
 
-				const bodyMarkdown = htmlToMarkdown(post.html ?? '');
+				const bodyMarkdown = htmlToMarkdown(stripRenderedPublicationProvenanceHtml(post.html ?? ''));
 				const title = post.title || 'Untitled Post';
 				await this.app.vault.process(file, (raw) => {
 					const content = upsertGhostMetadata(raw, ghostFields, prefix);
@@ -2955,6 +3071,29 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.syncUpdateSecondaryTitle)
 				.onChange(async (value) => {
 					this.plugin.settings.syncUpdateSecondaryTitle = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Publication provenance')
+			.setDesc('Choose what readers see at the end of posts. Version metadata is always stored invisibly in each post.')
+			.addDropdown(dropdown => dropdown
+				.addOption('visible-hash', 'Visible version and credit')
+				.addOption('visible-credit', 'Visible credit only')
+				.addOption('hidden', 'Hidden provenance')
+				.setValue(this.plugin.settings.publicationProvenanceVisibility)
+				.onChange(async (value) => {
+					this.plugin.settings.publicationProvenanceVisibility = value as PublicationProvenanceVisibility;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('Verify published content directly')
+			.setDesc('Compare all managed post fields even when the stored publication hash matches. Keep this on to detect edits made directly in the publishing site.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.verifyGhostContentOnSync)
+				.onChange(async (value) => {
+					this.plugin.settings.verifyGhostContentOnSync = value;
 					await this.plugin.saveSettings();
 				}));
 
