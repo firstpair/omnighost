@@ -1463,8 +1463,11 @@ ${unescapeHtml(code.trim())}
   md = md.replace(/<h6[^>]*>([\s\S]*?)<\/h6>/gi, (_, t) => `###### ${stripTags(t).trim()}
 `);
   md = md.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_, inner) => {
-    const text = stripTags(inner).trim();
-    return text.split("\n").map((line) => `> ${line}`).join("\n") + "\n";
+    const text = inner.replace(/<\/p>\s*<p[^>]*>/gi, "\n\n").replace(/<br[^>]*\/?>/gi, "\n");
+    const quoted = stripTags(text).trim().split("\n").map((line) => line.trim() ? `> ${line.trim()}` : ">").join("\n");
+    return `${quoted}
+
+`;
   });
   md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
     return inner.replace(
