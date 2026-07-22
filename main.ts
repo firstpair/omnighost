@@ -979,6 +979,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			let changed = false;
 			// Blogs configured before folder auto-derivation keep their folder as-is.
 			for (const b of this.settings.blogs) {
+				const normalizedUrl = normalizeGhostSiteUrl(b.url);
+				if (normalizedUrl !== b.url) { b.url = normalizedUrl; changed = true; }
 				if (b.folderAuto === undefined) { b.folderAuto = false; changed = true; }
 			}
 			if (!this.settings.defaultBlogId || !this.settings.blogs.some(b => b.id === this.settings.defaultBlogId)) {
@@ -988,10 +990,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			if (changed) await this.saveSettings();
 			return;
 		}
+		const normalizedLegacyUrl = normalizeGhostSiteUrl(this.settings.ghostUrl);
+		if (normalizedLegacyUrl !== this.settings.ghostUrl) this.settings.ghostUrl = normalizedLegacyUrl;
 		const blog: GhostBlog = {
 			id: this.genBlogId(),
-			name: this.deriveBlogName(this.settings.ghostUrl) || 'My blog',
-			url: this.settings.ghostUrl,
+			name: this.deriveBlogName(normalizedLegacyUrl) || 'My blog',
+			url: normalizedLegacyUrl,
 			apiKeySecretName: this.settings.ghostApiKeySecretName,
 			folder: this.settings.syncFolder,
 			folderAuto: false

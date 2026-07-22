@@ -5004,6 +5004,11 @@ ${bodyMarkdown}`;
     if (this.settings.blogs && this.settings.blogs.length > 0) {
       let changed = false;
       for (const b of this.settings.blogs) {
+        const normalizedUrl = normalizeGhostSiteUrl(b.url);
+        if (normalizedUrl !== b.url) {
+          b.url = normalizedUrl;
+          changed = true;
+        }
         if (b.folderAuto === void 0) {
           b.folderAuto = false;
           changed = true;
@@ -5017,10 +5022,13 @@ ${bodyMarkdown}`;
         await this.saveSettings();
       return;
     }
+    const normalizedLegacyUrl = normalizeGhostSiteUrl(this.settings.ghostUrl);
+    if (normalizedLegacyUrl !== this.settings.ghostUrl)
+      this.settings.ghostUrl = normalizedLegacyUrl;
     const blog = {
       id: this.genBlogId(),
-      name: this.deriveBlogName(this.settings.ghostUrl) || "My blog",
-      url: this.settings.ghostUrl,
+      name: this.deriveBlogName(normalizedLegacyUrl) || "My blog",
+      url: normalizedLegacyUrl,
       apiKeySecretName: this.settings.ghostApiKeySecretName,
       folder: this.settings.syncFolder,
       folderAuto: false
