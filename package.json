@@ -1,13 +1,13 @@
 {
 	"name": "omnighost",
-	"version": "0.13.0",
+	"version": "0.14.0",
 	"description": "Publish and update Ghost CMS posts from Obsidian on desktop and iOS — image upload, in-place updates, scheduling and YAML metadata control.",
 	"author": "Alexy Khrabrov",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"test": "tsx --test src/versioning/note-version.test.ts src/versioning/publication-provenance.test.ts src/versioning/textpack-source.test.ts src/importers/textpack.test.ts src/ghost/api-client.test.ts src/ghost/url.test.ts",
+		"test": "tsx --test src/versioning/note-version.test.ts src/versioning/publication-provenance.test.ts src/versioning/textpack-source.test.ts src/importers/textpack.test.ts src/ghost/api-client.test.ts src/ghost/url.test.ts src/converters/html-to-markdown.test.ts",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"lint": "eslint . --ext .ts"
 	},

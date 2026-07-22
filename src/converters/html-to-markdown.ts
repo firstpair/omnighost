@@ -36,8 +36,17 @@ export function htmlToMarkdown(html: string): string {
 
 	// ── Blockquotes ─────────────────────────────────────────────────────────
 	md = md.replace(/<blockquote[^>]*>([\s\S]*?)<\/blockquote>/gi, (_: string, inner: string) => {
-		const text = stripTags(inner).trim();
-		return text.split('\n').map(line => `> ${line}`).join('\n') + '\n';
+		const text = inner
+			.replace(/<\/p>\s*<p[^>]*>/gi, '\n\n')
+			.replace(/<br[^>]*\/?>/gi, '\n');
+		const quoted = stripTags(text).trim()
+			.split('\n')
+			.map(line => line.trim() ? `> ${line.trim()}` : '>')
+			.join('\n');
+
+		// A blank line is required after a Markdown blockquote. Without it, the
+		// following paragraph is parsed as a lazy continuation of the quote.
+		return `${quoted}\n\n`;
 	});
 
 	// ── Lists ───────────────────────────────────────────────────────────────
