@@ -1,4 +1,4 @@
-import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TAbstractFile, TFolder, MarkdownView, normalizePath, debounce, Modal, ButtonComponent, parseYaml, stringifyYaml, setIcon } from 'obsidian';
+import { App, Plugin, PluginSettingTab, Setting, Notice, TFile, TAbstractFile, TFolder, MarkdownView, normalizePath, debounce, Modal, ButtonComponent, parseYaml, stringifyYaml, requestUrl, setIcon } from 'obsidian';
 import { GhostWriterSettings, DEFAULT_SETTINGS, GhostPost, GhostBlog, TitlePrimarySource, PublicationProvenanceVisibility } from './src/types';
 import { GhostAPIClient } from './src/ghost/api-client';
 import { generateNewPostTemplate, addGhostPropertiesToContent } from './src/templates';
@@ -32,6 +32,10 @@ import type { ImportedTextpackAsset } from './src/versioning/textpack-source';
 // Development mode flag - enables auto-sync on file changes (2s debounce)
 // Production mode - only syncs according to configured interval
 const DEV_MODE = false;
+
+const CODEX_UPDATE_BASE_URL = 'https://raw.githubusercontent.com/firstpair/omnighost/main';
+const CODEX_UPDATE_FILES = ['main.js', 'manifest.json', 'styles.css'] as const;
+type CodexUpdateFile = typeof CODEX_UPDATE_FILES[number];
 
 /** One deletable note↔post link, used by the bulk-delete flow. */
 interface BulkDeleteItem {
@@ -206,6 +210,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'open-editorial-calendar',
 			name: 'Open editorial calendar',
 			callback: () => { void this.activateCalendarView(); }
+		});
+
+		this.addCommand({
+			id: 'update-from-codex',
+			name: 'Update from codex',
+			callback: () => { void this.updateFromCodex(); }
 		});
 
 		// Add command to test connection
@@ -563,6 +573,104 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		await this.saveData(this.settings);
 		// Restart periodic sync with new settings
 		void this.setupPeriodicSync();
+	}
+
+	/** Download and replace the complete three-file Obsidian runtime bundle. */
+	private async updateFromCodex(): Promise<void> {
+		const pluginDir = this.manifest.dir;
+		if (!pluginDir) {
+			new Notice('Cannot locate the omnighost plugin folder');
+			return;
+		}
+
+		new Notice('Downloading the latest omnighost build...');
+		const adapter = this.app.vault.adapter;
+		const stagedPaths = new Map<CodexUpdateFile, string>();
+		const backupPaths = new Map<CodexUpdateFile, string>();
+		const originallyPresent = new Set<CodexUpdateFile>();
+
+		try {
+			const downloaded = await Promise.all(CODEX_UPDATE_FILES.map(async (file) => {
+				const response = await requestUrl({
+					url: `${CODEX_UPDATE_BASE_URL}/${file}?codex-update=${Date.now()}`,
+					method: 'GET',
+					headers: { 'Cache-Control': 'no-cache' }
+				});
+				if (response.status !== 200 || response.text.length === 0) {
+					throw new Error(`Could not download ${file} (HTTP ${response.status})`);
+				}
+				return [file, response.text] as const;
+			}));
+
+			const files = new Map<CodexUpdateFile, string>(downloaded);
+			this.validateCodexUpdate(files);
+
+			// Stage all downloads before touching the live plugin. Remove leftovers
+			// from an interrupted older update so all three files are always fresh.
+			for (const file of CODEX_UPDATE_FILES) {
+				const staged = normalizePath(`${pluginDir}/.${file}.codex-update`);
+				const backup = normalizePath(`${pluginDir}/.${file}.codex-backup`);
+				const target = normalizePath(`${pluginDir}/${file}`);
+				if (await adapter.exists(target)) originallyPresent.add(file);
+				await this.removeIfPresent(staged);
+				await this.removeIfPresent(backup);
+				await adapter.write(staged, files.get(file) ?? '');
+				stagedPaths.set(file, staged);
+				backupPaths.set(file, backup);
+			}
+
+			for (const file of CODEX_UPDATE_FILES) {
+				const target = normalizePath(`${pluginDir}/${file}`);
+				const backup = backupPaths.get(file);
+				if (!backup) throw new Error(`Missing backup path for ${file}`);
+				if (await adapter.exists(target)) {
+					await adapter.rename(target, backup);
+				}
+				const staged = stagedPaths.get(file);
+				if (!staged) throw new Error(`Missing staged path for ${file}`);
+				await adapter.rename(staged, target);
+			}
+
+			for (const backup of backupPaths.values()) await this.removeIfPresent(backup);
+			new Notice('Omnighost updated. Restart Obsidian to load the new version.', 10000);
+		} catch (error) {
+			console.error('[Omnighost] Codex update failed:', error);
+			// Restore the former complete set whenever installation was interrupted.
+			for (const file of CODEX_UPDATE_FILES) {
+				const target = normalizePath(`${pluginDir}/${file}`);
+				const backup = backupPaths.get(file);
+				if (backup && await adapter.exists(backup)) {
+					await this.removeIfPresent(target);
+					await adapter.rename(backup, target);
+				} else if (!originallyPresent.has(file)) {
+					await this.removeIfPresent(target);
+				}
+			}
+			for (const staged of stagedPaths.values()) await this.removeIfPresent(staged);
+			const message = error instanceof Error ? error.message : String(error);
+			new Notice(`Omnighost update failed: ${message}`, 10000);
+		}
+	}
+
+	private validateCodexUpdate(files: ReadonlyMap<CodexUpdateFile, string>): void {
+		const main = files.get('main.js') ?? '';
+		const styles = files.get('styles.css') ?? '';
+		if (!main.includes('GENERATED/BUNDLED FILE BY ESBUILD') || !main.includes('module.exports')) {
+			throw new Error('Downloaded main.js is not a valid Omnighost build');
+		}
+		if (styles.trim().length < 100) throw new Error('Downloaded styles.css is incomplete');
+
+		const manifestText = files.get('manifest.json') ?? '';
+		const manifest = JSON.parse(manifestText) as unknown;
+		if (!manifest || typeof manifest !== 'object') throw new Error('Downloaded manifest is invalid');
+		const values = manifest as Record<string, unknown>;
+		if (values.id !== 'omnighost' || typeof values.version !== 'string') {
+			throw new Error('Downloaded manifest is not for Omnighost');
+		}
+	}
+
+	private async removeIfPresent(path: string): Promise<void> {
+		if (await this.app.vault.adapter.exists(path)) await this.app.vault.adapter.remove(path);
 	}
 
 	/** Path of the image-cache file, kept in the plugin dir, separate from data.json. */

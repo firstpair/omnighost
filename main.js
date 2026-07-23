@@ -4200,6 +4200,8 @@ async function ensureNoteVersioned(app, file, expectedSource) {
 
 // main.ts
 var DEV_MODE = false;
+var CODEX_UPDATE_BASE_URL = "https://raw.githubusercontent.com/firstpair/omnighost/main";
+var CODEX_UPDATE_FILES = ["main.js", "manifest.json", "styles.css"];
 var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
   constructor() {
     super(...arguments);
@@ -4314,6 +4316,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
       name: "Open editorial calendar",
       callback: () => {
         void this.activateCalendarView();
+      }
+    });
+    this.addCommand({
+      id: "update-from-codex",
+      name: "Update from codex",
+      callback: () => {
+        void this.updateFromCodex();
       }
     });
     this.addCommand({
@@ -4638,6 +4647,101 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
   async saveSettings() {
     await this.saveData(this.settings);
     void this.setupPeriodicSync();
+  }
+  /** Download and replace the complete three-file Obsidian runtime bundle. */
+  async updateFromCodex() {
+    var _a;
+    const pluginDir = this.manifest.dir;
+    if (!pluginDir) {
+      new import_obsidian12.Notice("Cannot locate the omnighost plugin folder");
+      return;
+    }
+    new import_obsidian12.Notice("Downloading the latest omnighost build...");
+    const adapter = this.app.vault.adapter;
+    const stagedPaths = /* @__PURE__ */ new Map();
+    const backupPaths = /* @__PURE__ */ new Map();
+    const originallyPresent = /* @__PURE__ */ new Set();
+    try {
+      const downloaded = await Promise.all(CODEX_UPDATE_FILES.map(async (file) => {
+        const response = await (0, import_obsidian12.requestUrl)({
+          url: `${CODEX_UPDATE_BASE_URL}/${file}?codex-update=${Date.now()}`,
+          method: "GET",
+          headers: { "Cache-Control": "no-cache" }
+        });
+        if (response.status !== 200 || response.text.length === 0) {
+          throw new Error(`Could not download ${file} (HTTP ${response.status})`);
+        }
+        return [file, response.text];
+      }));
+      const files = new Map(downloaded);
+      this.validateCodexUpdate(files);
+      for (const file of CODEX_UPDATE_FILES) {
+        const staged = (0, import_obsidian12.normalizePath)(`${pluginDir}/.${file}.codex-update`);
+        const backup = (0, import_obsidian12.normalizePath)(`${pluginDir}/.${file}.codex-backup`);
+        const target = (0, import_obsidian12.normalizePath)(`${pluginDir}/${file}`);
+        if (await adapter.exists(target))
+          originallyPresent.add(file);
+        await this.removeIfPresent(staged);
+        await this.removeIfPresent(backup);
+        await adapter.write(staged, (_a = files.get(file)) != null ? _a : "");
+        stagedPaths.set(file, staged);
+        backupPaths.set(file, backup);
+      }
+      for (const file of CODEX_UPDATE_FILES) {
+        const target = (0, import_obsidian12.normalizePath)(`${pluginDir}/${file}`);
+        const backup = backupPaths.get(file);
+        if (!backup)
+          throw new Error(`Missing backup path for ${file}`);
+        if (await adapter.exists(target)) {
+          await adapter.rename(target, backup);
+        }
+        const staged = stagedPaths.get(file);
+        if (!staged)
+          throw new Error(`Missing staged path for ${file}`);
+        await adapter.rename(staged, target);
+      }
+      for (const backup of backupPaths.values())
+        await this.removeIfPresent(backup);
+      new import_obsidian12.Notice("Omnighost updated. Restart Obsidian to load the new version.", 1e4);
+    } catch (error) {
+      console.error("[Omnighost] Codex update failed:", error);
+      for (const file of CODEX_UPDATE_FILES) {
+        const target = (0, import_obsidian12.normalizePath)(`${pluginDir}/${file}`);
+        const backup = backupPaths.get(file);
+        if (backup && await adapter.exists(backup)) {
+          await this.removeIfPresent(target);
+          await adapter.rename(backup, target);
+        } else if (!originallyPresent.has(file)) {
+          await this.removeIfPresent(target);
+        }
+      }
+      for (const staged of stagedPaths.values())
+        await this.removeIfPresent(staged);
+      const message = error instanceof Error ? error.message : String(error);
+      new import_obsidian12.Notice(`Omnighost update failed: ${message}`, 1e4);
+    }
+  }
+  validateCodexUpdate(files) {
+    var _a, _b, _c;
+    const main = (_a = files.get("main.js")) != null ? _a : "";
+    const styles = (_b = files.get("styles.css")) != null ? _b : "";
+    if (!main.includes("GENERATED/BUNDLED FILE BY ESBUILD") || !main.includes("module.exports")) {
+      throw new Error("Downloaded main.js is not a valid Omnighost build");
+    }
+    if (styles.trim().length < 100)
+      throw new Error("Downloaded styles.css is incomplete");
+    const manifestText = (_c = files.get("manifest.json")) != null ? _c : "";
+    const manifest = JSON.parse(manifestText);
+    if (!manifest || typeof manifest !== "object")
+      throw new Error("Downloaded manifest is invalid");
+    const values = manifest;
+    if (values.id !== "omnighost" || typeof values.version !== "string") {
+      throw new Error("Downloaded manifest is not for Omnighost");
+    }
+  }
+  async removeIfPresent(path) {
+    if (await this.app.vault.adapter.exists(path))
+      await this.app.vault.adapter.remove(path);
   }
   /** Path of the image-cache file, kept in the plugin dir, separate from data.json. */
   imageCachePath() {
