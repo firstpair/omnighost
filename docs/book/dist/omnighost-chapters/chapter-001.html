@@ -11,9 +11,7 @@
     div.sitenav { display: flex; flex-direction: row; flex-wrap: wrap; }
     span.navlink { flex: 1; }
     span.navlink-label { display: inline-block; min-width: 4em; }
-    /* Default styles provided by pandoc.
-    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
-    */
+    code{white-space: pre-wrap;}
     span.smallcaps{font-variant: small-caps;}
     div.columns{display: flex; gap: min(4vw, 1.5em);}
     div.column{flex: auto; overflow-x: auto;}
@@ -29,9 +27,8 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
-    html { -webkit-text-size-adjust: 100%; }
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
+    pre > code.sourceCode > span { line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -119,7 +116,7 @@
   <p style="font-size: 1.2em; margin: 0 0 0.3em;">Publishing from Obsidian to Ghost</p>
   <p style="font-size: 1.05em; margin: 0 0 4em;">Across Every Blog</p>
   <p style="font-size: 1.2em; margin: 0.2em 0;">Alexy Khrabrov</p>
-  <p style="font-size: 0.85em; margin: 1.5em 0 0;">omnighost (0.15.1)</p>
+  <p style="font-size: 0.85em; margin: 1.5em 0 0;">omnighost (0.16.1)</p>
 </section>
 <p><span id="ch002.xhtml"></span></p>
 <section id="ch002.xhtml_preface" class="level1">
@@ -592,8 +589,8 @@ public:</p>
 desktop, revise on iPad, finish on iPhone, and sync from the same
 vault.</li>
 <li><strong>Manage many Ghost blogs.</strong> Add one blog per
-publication channel, each with its own site URL, Admin API key, folder,
-automatic sync setting, and interval.</li>
+publication channel, each with its own site URL, Admin API key or staff
+access token, folder, automatic sync setting, and interval.</li>
 <li><strong>Choose one blog or many.</strong> Use <code>g_blog</code>,
 the blog picker, or folder routing to decide whether a note goes to one
 site, several sites, or none.</li>
@@ -669,18 +666,40 @@ has:</p>
 <li>a display <strong>Name</strong>;</li>
 <li>a <strong>Site address</strong> such as
 <code>https://yourblog.com</code>;</li>
-<li>an <strong>Admin API Key</strong>, which you create in Ghost admin
-under <em>Settings → Integrations → Add custom integration</em> and
-paste into that blog’s key field;</li>
+<li>a <strong>Use staff access token</strong> toggle, off by
+default;</li>
+<li>an <strong>Admin API key</strong> or <strong>Staff access
+token</strong> credential field, selected by that toggle;</li>
 <li>a vault <strong>Folder</strong> for that blog’s posts;</li>
 <li>an <strong>Auto-sync this folder</strong> toggle; and</li>
 <li>an optional per-blog <strong>Sync interval</strong>.</li>
 </ul>
-<p>Tap <strong>Save key</strong> for each blog. Omnighost stores the key
+<p>Leave <strong>Use staff access token</strong> off for the usual
+integration path. Create a custom integration under <strong>Ghost Admin
+→ Settings → Integrations</strong>, copy its <strong>Admin API
+key</strong>, and paste it into the blog’s credential field. Omnighost
+authenticates as that integration, with Ghost’s standard integration
+permissions.</p>
+<p>Turn <strong>Use staff access token</strong> on when Omnighost should
+act as a particular Ghost staff member. Copy that user’s token from
+their profile page and paste it into the now-labelled <strong>Staff
+access token</strong> field. Requests then use that staff member’s role
+permissions: for example, a Contributor cannot publish, while Authors
+and more privileged roles can. This is useful when authorship and
+least-privilege access should follow a real editorial identity rather
+than a site-wide integration.</p>
+<p>Both credentials use Ghost’s <code>id:secret</code> form. Tap
+<strong>Save key</strong> for each blog. Omnighost stores the credential
 in Obsidian’s secure keychain and immediately tests the connection. A
 good connection greets you by the Ghost site’s name. If two blogs
 accidentally share the same keychain secret, settings warns you, because
-the wrong key will fail with a Ghost 401.</p>
+the wrong credential will fail with a Ghost 401.</p>
+<p>Authentication mode belongs to each blog. Existing blogs and newly
+added blogs default to <strong>Admin API key</strong>, and toggling one
+blog to staff access does not affect the others. Adding a blog or
+changing the staff-access toggle redraws the settings controls without
+jumping the pane back to the top, so you stay with the blog you are
+editing.</p>
 <p>You may enter a bare address such as <code>yourblog.com</code>;
 Omnighost treats it as <code>https://yourblog.com</code>. Only specify
 <code>http://</code> deliberately when you are connecting to a local or
@@ -852,8 +871,11 @@ identity.</figcaption>
 </figure>
 <p>In <strong>Settings → Omnighost</strong>, the <strong>Ghost
 blogs</strong> section lets you <strong>Add blog</strong>. Each one gets
-its own name, site address, Admin API key (a keychain secret), folder in
-your vault, sync toggle, and optional interval. One blog is marked the
+its own name, site address, authentication mode and credential (stored
+as a keychain secret), folder in your vault, sync toggle, and optional
+interval. Admin API key authentication is the default; turn on
+<strong>Use staff access token</strong> only for blogs that should
+publish with a staff member’s role permissions. One blog is marked the
 default (★), and a <strong>Test</strong> button confirms each connection
 by name.</p>
 <p>Blog folders nest under one root. By default each blog’s folder
@@ -1036,9 +1058,11 @@ fix.</figcaption>
 <p>A few common cases and what they mean:</p>
 <ul>
 <li><strong>“Successfully connected” shows the wrong name, or connection
-fails</strong> — that blog’s Ghost URL or Admin API Key is wrong.
-Re-enter them in the blog block; the greeting confirms the right
-site.</li>
+fails</strong> — check that blog’s Ghost URL, <strong>Use staff access
+token</strong> toggle, and credential. An Admin API key entered while
+Staff mode is on — or the reverse — will not authenticate correctly.
+Re-enter the matching credential in the blog block; the greeting
+confirms the right site.</li>
 <li><strong>A slug-length error</strong> (as pictured) — the note had no
 heading, so the title fell back to a long first paragraph. Give the note
 a short <code># Heading</code> or set <code>g_slug</code>
@@ -1053,9 +1077,10 @@ versions tie the green “Published” badge to a real published URL, so a
 failed sync won’t falsely show green. If yours does, update the
 plugin.</li>
 <li><strong>A blog sync says the key is missing</strong> — each blog
-needs its own stored Admin API key. Paste the key into that blog’s
-<strong>Admin API key</strong> field and tap <strong>Save
-key</strong>.</li>
+needs its own stored credential. Leave Staff mode off and paste an
+integration key into <strong>Admin API key</strong>, or turn Staff mode
+on and paste the user token into <strong>Staff access token</strong>,
+then tap <strong>Save key</strong>.</li>
 <li><strong>An imported note is “chopped” or later text sits inside a
 code block or quote</strong> — update Omnighost, then re-import the
 post. Current releases close imported fenced-code and blockquote runs at
@@ -1159,94 +1184,94 @@ on.</p>
 <col style="width: 33%" />
 </colgroup>
 <thead>
-<tr>
+<tr class="header">
 <th>Property</th>
 <th>Type</th>
 <th>Meaning</th>
 </tr>
 </thead>
 <tbody>
-<tr>
+<tr class="odd">
 <td><code>g_blog</code></td>
 <td>list of names or domains</td>
 <td>Which blog(s) the note publishes to (default if absent)</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_published</code></td>
 <td>checkbox</td>
 <td>Off = draft, on = published</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_post_access</code></td>
 <td><code>public</code> / <code>members</code> / <code>paid</code></td>
 <td>Who can read it</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_published_at</code></td>
 <td>date</td>
 <td>Future date schedules the post</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_featured</code></td>
 <td>checkbox</td>
 <td>Mark as a featured post</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_slug</code></td>
 <td>text</td>
 <td>URL ending (empty = from title)</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_tags</code></td>
 <td>list</td>
 <td>Post tags</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_excerpt</code></td>
 <td>text</td>
 <td>Short summary (max 300 chars)</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_feature_image</code></td>
 <td>text</td>
 <td>Cover image URL</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_cover_from_first_image</code></td>
 <td>checkbox</td>
 <td>Use the first body image as the cover</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_no_sync</code></td>
 <td>checkbox</td>
 <td>Skip this note when syncing</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_id_&lt;blog&gt;</code></td>
 <td>written by plugin</td>
 <td>The Ghost id for one target blog, using a domain-based suffix</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_url_&lt;blog&gt;</code></td>
 <td>written by plugin</td>
 <td>The Ghost editor link for that blog’s post</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_public_url_&lt;blog&gt;</code></td>
 <td>written by plugin</td>
 <td>The live, public web address for that blog’s post</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_archived</code></td>
 <td>written by plugin</td>
 <td>True when a bulk-deleted local note is archived</td>
 </tr>
-<tr>
+<tr class="even">
 <td><code>g_archived_at</code></td>
 <td>written by plugin</td>
 <td>When the note was moved into the archive folder</td>
 </tr>
-<tr>
+<tr class="odd">
 <td><code>g_archived_from</code></td>
 <td>written by plugin</td>
 <td>The note’s original vault path before archive</td>
