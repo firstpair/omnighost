@@ -4,10 +4,11 @@ import * as path from 'node:path';
 import { test } from 'node:test';
 import { build } from 'esbuild';
 import { preparePublicationProvenance } from '../versioning/publication-provenance';
-import type { GhostPost, GhostPostWrite } from '../types';
+import type { GhostAuthMode, GhostPost, GhostPostWrite } from '../types';
 
 interface RequestOptions {
 	method?: string;
+	headers?: Record<string, string>;
 }
 
 interface RequestResponse {
@@ -17,6 +18,7 @@ interface RequestResponse {
 }
 
 interface GhostApiClientLike {
+	getPosts(): Promise<GhostPost[]>;
 	updatePost(
 		postId: string,
 		post: GhostPostWrite,
@@ -25,7 +27,7 @@ interface GhostApiClientLike {
 }
 
 interface ApiClientModule {
-	GhostAPIClient: new (url: string, key: string, app: unknown) => GhostApiClientLike;
+	GhostAPIClient: new (url: string, key: string, app: unknown, authMode?: GhostAuthMode) => GhostApiClientLike;
 }
 
 type RequestHandler = (options: RequestOptions) => Promise<RequestResponse>;
@@ -68,6 +70,37 @@ function rawLexical(): string {
 		}
 	});
 }
+
+void test('staff access tokens generate a Ghost Admin JWT', async () => {
+	let authorization = '';
+	const runtime = globalThis as typeof globalThis & { __omnighostApiRequest?: RequestHandler };
+	runtime.__omnighostApiRequest = async (options) => {
+		authorization = options.headers?.Authorization ?? '';
+		return { status: 200, text: '', json: { posts: [] } };
+	};
+	try {
+		const module = await loadApiClient();
+		const client = new module.GhostAPIClient(
+			'https://example.com',
+			`staff-token-id:${'00'.repeat(32)}`,
+			{},
+			'staff'
+		);
+		await client.getPosts();
+		assert.match(authorization, /^Ghost [^.]+\.[^.]+\.[^.]+$/);
+		const encodedPayload = authorization.slice('Ghost '.length).split('.')[1];
+		const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')) as { aud?: string };
+		assert.equal(payload.aud, '/admin/');
+	} finally {
+		delete runtime.__omnighostApiRequest;
+	}
+});
+
+void test('staff mode reports a staff-token-specific configuration error', async () => {
+	const module = await loadApiClient();
+	const client = new module.GhostAPIClient('https://example.com', '', {}, 'staff');
+	await assert.rejects(() => client.getPosts(), /Staff access token not configured/);
+});
 
 void test('an unchanged inherited Git publication performs no Ghost PUT', async () => {
 	const gitCommit = '0123456789abcdef0123456789abcdef01234567';

@@ -1,5 +1,5 @@
 import { App, requestUrl, RequestUrlResponse } from 'obsidian';
-import { GhostPost, GhostPostWrite } from '../types';
+import { GhostAuthMode, GhostPost, GhostPostWrite } from '../types';
 import { normalizeGhostSiteUrl } from './url';
 import {
 	compareManagedPublicationState,
@@ -67,6 +67,7 @@ interface PreparedImageUpload {
 export class GhostAPIClient {
 	private apiUrl: string;
 	private apiKey: string;
+	private authMode: GhostAuthMode;
 	private app: App;
 
 	private postMatchesUpdate(current: GhostPost, requested: GhostPostWrite): boolean {
@@ -86,18 +87,20 @@ export class GhostAPIClient {
 		return true;
 	}
 
-	constructor(ghostUrl: string, apiKey: string, app: App) {
+	constructor(ghostUrl: string, apiKey: string, app: App, authMode: GhostAuthMode = 'admin') {
 		this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
 		this.apiKey = apiKey;
+		this.authMode = authMode;
 		this.app = app;
 	}
 
 	/**
 	 * Update credentials
 	 */
-	updateCredentials(ghostUrl: string, apiKey: string): void {
+	updateCredentials(ghostUrl: string, apiKey: string, authMode: GhostAuthMode = 'admin'): void {
 		this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
 		this.apiKey = apiKey;
+		this.authMode = authMode;
 	}
 
 	/**
@@ -105,8 +108,9 @@ export class GhostAPIClient {
 	 * Format: {id}:{secret}
 	 */
 	private async generateToken(): Promise<string> {
+		const credentialLabel = this.authMode === 'staff' ? 'Staff access token' : 'Admin API key';
 		if (!this.apiKey) {
-			throw new Error('Admin API key not configured');
+			throw new Error(`${credentialLabel} not configured`);
 		}
 
 		// Trim whitespace/newlines accidentally pasted with the key (a very common
@@ -118,7 +122,7 @@ export class GhostAPIClient {
 		const secret = sep === -1 ? '' : trimmedKey.slice(sep + 1).trim();
 
 		if (!id || !secret) {
-			throw new Error('Invalid Admin API key format. Expected format: id:secret');
+			throw new Error(`Invalid ${credentialLabel} format. Expected format: id:secret`);
 		}
 
 		// Generate JWT token

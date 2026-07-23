@@ -1,12 +1,15 @@
 /**
- * One configured Ghost blog. Each blog has its own URL, Admin API key (stored in
- * the keychain under `apiKeySecretName`), and its own folder for imported posts.
+ * One configured Ghost blog. Each blog has its own URL, API credential (stored
+ * in the keychain under `apiKeySecretName`), and folder for imported posts.
  */
+export type GhostAuthMode = 'admin' | 'staff';
+
 export interface GhostBlog {
 	id: string;               // stable, generated id
 	name: string;             // display name
 	url: string;
 	apiKeySecretName: string; // name of the secret in Obsidian's keychain
+	authMode?: GhostAuthMode; // defaults to integration Admin API key auth
 	folder: string;           // vault folder for this blog's posts
 	folderAuto?: boolean;     // folder is derived from the URL: "<root>/<domain>"
 	syncEnabled?: boolean;    // per-blog periodic sync toggle

@@ -618,32 +618,35 @@ var GhostAPIClient = class {
       return false;
     return true;
   }
-  constructor(ghostUrl, apiKey, app) {
+  constructor(ghostUrl, apiKey, app, authMode = "admin") {
     this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
     this.apiKey = apiKey;
+    this.authMode = authMode;
     this.app = app;
   }
   /**
    * Update credentials
    */
-  updateCredentials(ghostUrl, apiKey) {
+  updateCredentials(ghostUrl, apiKey, authMode = "admin") {
     this.apiUrl = normalizeGhostSiteUrl(ghostUrl);
     this.apiKey = apiKey;
+    this.authMode = authMode;
   }
   /**
    * Generate JWT token for Ghost Admin API
    * Format: {id}:{secret}
    */
   async generateToken() {
+    const credentialLabel = this.authMode === "staff" ? "Staff access token" : "Admin API key";
     if (!this.apiKey) {
-      throw new Error("Admin API key not configured");
+      throw new Error(`${credentialLabel} not configured`);
     }
     const trimmedKey = this.apiKey.trim();
     const sep = trimmedKey.indexOf(":");
     const id = sep === -1 ? "" : trimmedKey.slice(0, sep).trim();
     const secret = sep === -1 ? "" : trimmedKey.slice(sep + 1).trim();
     if (!id || !secret) {
-      throw new Error("Invalid Admin API key format. Expected format: id:secret");
+      throw new Error(`Invalid ${credentialLabel} format. Expected format: id:secret`);
     }
     const header = {
       alg: "HS256",
@@ -5127,6 +5130,10 @@ ${bodyMarkdown}`;
           b.folderAuto = false;
           changed = true;
         }
+        if (b.authMode === void 0) {
+          b.authMode = "admin";
+          changed = true;
+        }
       }
       if (!this.settings.defaultBlogId || !this.settings.blogs.some((b) => b.id === this.settings.defaultBlogId)) {
         this.settings.defaultBlogId = this.settings.blogs[0].id;
@@ -5144,6 +5151,7 @@ ${bodyMarkdown}`;
       name: this.deriveBlogName(normalizedLegacyUrl) || "My blog",
       url: normalizedLegacyUrl,
       apiKeySecretName: this.settings.ghostApiKeySecretName,
+      authMode: "admin",
       folder: this.settings.syncFolder,
       folderAuto: false
     };
@@ -5153,13 +5161,14 @@ ${bodyMarkdown}`;
   }
   /** Get (or create) the API client for a blog. */
   getClientForBlog(blog) {
+    var _a, _b;
     const key = this.loadApiKeyForSecret(blog.apiKeySecretName);
     let client = this.blogClients.get(blog.id);
     if (!client) {
-      client = new GhostAPIClient(blog.url, key, this.app);
+      client = new GhostAPIClient(blog.url, key, this.app, (_a = blog.authMode) != null ? _a : "admin");
       this.blogClients.set(blog.id, client);
     } else {
-      client.updateCredentials(blog.url, key);
+      client.updateCredentials(blog.url, key, (_b = blog.authMode) != null ? _b : "admin");
     }
     return client;
   }
@@ -6946,16 +6955,17 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
       }
     };
     plugin.settings.blogs.forEach((blog) => {
+      var _a;
       const isDefault = blog.id === plugin.settings.defaultBlogId;
       new import_obsidian12.Setting(containerEl).setHeading().setName(`${blog.name || "Untitled blog"}${isDefault ? "  \u2605 default" : ""}`).addExtraButton((b) => b.setIcon("star").setTooltip("Set as default").onClick(async () => {
         plugin.settings.defaultBlogId = blog.id;
         await plugin.saveSettings();
         this.display();
       })).addExtraButton((b) => b.setIcon("trash").setTooltip("Remove blog").onClick(async () => {
-        var _a, _b;
+        var _a2, _b;
         plugin.settings.blogs = plugin.settings.blogs.filter((x) => x.id !== blog.id);
         if (plugin.settings.defaultBlogId === blog.id) {
-          plugin.settings.defaultBlogId = (_b = (_a = plugin.settings.blogs[0]) == null ? void 0 : _a.id) != null ? _b : "";
+          plugin.settings.defaultBlogId = (_b = (_a2 = plugin.settings.blogs[0]) == null ? void 0 : _a2.id) != null ? _b : "";
         }
         await plugin.saveSettings();
         this.display();
@@ -7031,8 +7041,17 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
       let pendingKey = "";
       let keyInput = null;
       let secretNameInput = null;
-      const keySetting = new import_obsidian12.Setting(containerEl).setName("Admin API key");
-      const setKeyDesc = (stored) => keySetting.setDesc(stored ? "\u2713 Key stored for this blog. Enter a new one to replace it." : "Paste this blog's admin key (id:secret) and save.");
+      new import_obsidian12.Setting(containerEl).setName("Use staff access token").setDesc("Off uses a custom integration Admin API key. On authenticates as the staff member and uses their role permissions.").addToggle((t) => {
+        var _a2;
+        return t.setValue(((_a2 = blog.authMode) != null ? _a2 : "admin") === "staff").onChange(async (v) => {
+          blog.authMode = v ? "staff" : "admin";
+          await plugin.saveSettings();
+          this.display();
+        });
+      });
+      const credentialLabel = ((_a = blog.authMode) != null ? _a : "admin") === "staff" ? "Staff access token" : "Admin API key";
+      const keySetting = new import_obsidian12.Setting(containerEl).setName(credentialLabel);
+      const setKeyDesc = (stored) => keySetting.setDesc(stored ? `\u2713 ${credentialLabel} stored for this blog. Enter a new one to replace it.` : `Paste this blog's ${credentialLabel.toLowerCase()} (id:secret) and save.`);
       setKeyDesc(hasKey);
       keySetting.addText((t) => {
         keyInput = t.inputEl;
@@ -7064,7 +7083,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
           const title = await plugin.getClientForBlog(blog).testConnection();
           b.setDisabled(false);
           if (title) {
-            keySetting.setDesc(`\u2713 Connected to ${title}. Enter a new key to replace it.`);
+            keySetting.setDesc(`\u2713 Connected to ${title}. Enter a new ${credentialLabel.toLowerCase()} to replace it.`);
             new import_obsidian12.Notice(`${blog.name || "Blog"}: connected to ${title} \u2713`);
           } else {
             keySetting.setDesc("\u26A0 Key saved but the connection failed \u2014 check the key and site address.");
@@ -7120,7 +7139,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
     });
     new import_obsidian12.Setting(containerEl).addButton((b) => b.setButtonText("Add blog").setCta().onClick(async () => {
       const id = plugin.genBlogId();
-      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, folder: plugin.ghostPostsRoot(), folderAuto: true };
+      const blog = { id, name: "New blog", url: "", apiKeySecretName: `omnighost-key-${id}`, authMode: "admin", folder: plugin.ghostPostsRoot(), folderAuto: true };
       plugin.settings.blogs.push(blog);
       if (!plugin.settings.defaultBlogId)
         plugin.settings.defaultBlogId = blog.id;

@@ -1090,6 +1090,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				const normalizedUrl = normalizeGhostSiteUrl(b.url);
 				if (normalizedUrl !== b.url) { b.url = normalizedUrl; changed = true; }
 				if (b.folderAuto === undefined) { b.folderAuto = false; changed = true; }
+				if (b.authMode === undefined) { b.authMode = 'admin'; changed = true; }
 			}
 			if (!this.settings.defaultBlogId || !this.settings.blogs.some(b => b.id === this.settings.defaultBlogId)) {
 				this.settings.defaultBlogId = this.settings.blogs[0].id;
@@ -1105,6 +1106,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			name: this.deriveBlogName(normalizedLegacyUrl) || 'My blog',
 			url: normalizedLegacyUrl,
 			apiKeySecretName: this.settings.ghostApiKeySecretName,
+			authMode: 'admin',
 			folder: this.settings.syncFolder,
 			folderAuto: false
 		};
@@ -1118,10 +1120,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const key = this.loadApiKeyForSecret(blog.apiKeySecretName);
 		let client = this.blogClients.get(blog.id);
 		if (!client) {
-			client = new GhostAPIClient(blog.url, key, this.app);
+			client = new GhostAPIClient(blog.url, key, this.app, blog.authMode ?? 'admin');
 			this.blogClients.set(blog.id, client);
 		} else {
-			client.updateCredentials(blog.url, key);
+			client.updateCredentials(blog.url, key, blog.authMode ?? 'admin');
 		}
 		return client;
 	}
@@ -2991,10 +2993,21 @@ class GhostWriterSettingTab extends PluginSettingTab {
 			let pendingKey = '';
 			let keyInput: HTMLInputElement | null = null;
 			let secretNameInput: HTMLInputElement | null = null;
-			const keySetting = new Setting(containerEl).setName('Admin API key');
+			new Setting(containerEl).setName('Use staff access token')
+				// eslint-disable-next-line obsidianmd/ui/sentence-case -- Ghost product name: Admin API
+				.setDesc('Off uses a custom integration Admin API key. On authenticates as the staff member and uses their role permissions.')
+				.addToggle(t => t
+					.setValue((blog.authMode ?? 'admin') === 'staff')
+					.onChange(async v => {
+						blog.authMode = v ? 'staff' : 'admin';
+						await plugin.saveSettings();
+						this.display();
+					}));
+			const credentialLabel = (blog.authMode ?? 'admin') === 'staff' ? 'Staff access token' : 'Admin API key';
+			const keySetting = new Setting(containerEl).setName(credentialLabel);
 			const setKeyDesc = (stored: boolean) => keySetting.setDesc(stored
-				? '✓ Key stored for this blog. Enter a new one to replace it.'
-				: "Paste this blog's admin key (id:secret) and save.");
+				? `✓ ${credentialLabel} stored for this blog. Enter a new one to replace it.`
+				: `Paste this blog's ${credentialLabel.toLowerCase()} (id:secret) and save.`);
 			setKeyDesc(hasKey);
 			keySetting
 				.addText(t => {
@@ -3020,7 +3033,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 						const title = await plugin.getClientForBlog(blog).testConnection();
 						b.setDisabled(false);
 						if (title) {
-							keySetting.setDesc(`✓ Connected to ${title}. Enter a new key to replace it.`);
+							keySetting.setDesc(`✓ Connected to ${title}. Enter a new ${credentialLabel.toLowerCase()} to replace it.`);
 							new Notice(`${blog.name || 'Blog'}: connected to ${title} ✓`);
 						} else {
 							// eslint-disable-next-line obsidianmd/ui/sentence-case
@@ -3077,7 +3090,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl).addButton(b => b.setButtonText('Add blog').setCta().onClick(async () => {
 			const id = plugin.genBlogId();
-			const blog: GhostBlog = { id, name: 'New blog', url: '', apiKeySecretName: `omnighost-key-${id}`, folder: plugin.ghostPostsRoot(), folderAuto: true };
+			const blog: GhostBlog = { id, name: 'New blog', url: '', apiKeySecretName: `omnighost-key-${id}`, authMode: 'admin', folder: plugin.ghostPostsRoot(), folderAuto: true };
 			plugin.settings.blogs.push(blog);
 			if (!plugin.settings.defaultBlogId) plugin.settings.defaultBlogId = blog.id;
 			await plugin.saveSettings();
