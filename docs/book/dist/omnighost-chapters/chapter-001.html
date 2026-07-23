@@ -5,7 +5,7 @@
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <meta name="author" content="Alexy Khrabrov" />
-  <meta name="dcterms.date" content="2026-07-15" />
+  <meta name="dcterms.date" content="2026-07-23" />
   <title>Omnighost for First Pair Press</title>
   <style>
     div.sitenav { display: flex; flex-direction: row; flex-wrap: wrap; }
@@ -119,7 +119,7 @@
   <p style="font-size: 1.2em; margin: 0 0 0.3em;">Publishing from Obsidian to Ghost</p>
   <p style="font-size: 1.05em; margin: 0 0 4em;">Across Every Blog</p>
   <p style="font-size: 1.2em; margin: 0.2em 0;">Alexy Khrabrov</p>
-  <p style="font-size: 0.85em; margin: 1.5em 0 0;">omnighost (0.12.9)</p>
+  <p style="font-size: 0.85em; margin: 1.5em 0 0;">omnighost (0.15.1)</p>
 </section>
 <p><span id="ch002.xhtml"></span></p>
 <section id="ch002.xhtml_preface" class="level1">
@@ -608,12 +608,21 @@ can become the Ghost feature image and disappear from the body, which is
 useful for announcement cards.</li>
 <li><strong>Avoid repeat image uploads.</strong> Images are cached by
 content hash, so unchanged assets are reused on later syncs.</li>
+<li><strong>Skip unchanged posts.</strong> Omnighost compares the
+finished Ghost publication, reports <code>Unchanged</code>, and avoids a
+needless update when nothing managed by the plugin has changed.</li>
+<li><strong>Record publication provenance.</strong> Every managed post
+carries a reproducible SHA-256 and, when desktop Git is available, the
+source note’s Git version.</li>
 <li><strong>Import textpacks.</strong> A <code>.textpack</code> can
 carry Markdown, images, and Omnighost metadata into the vault as a
 sync-ready draft.</li>
 <li><strong>Import or link existing Ghost posts.</strong> A Ghost site
 can be pulled back into the vault, one post or one blog at a time, so
 Obsidian remains the editorial source.</li>
+<li><strong>Update itself from GitHub.</strong> A command replaces the
+complete three-file plugin bundle from the repository’s current
+<code>main</code> branch and rolls back if installation fails.</li>
 <li><strong>Clean up safely.</strong> Bulk delete uses a checklist,
 optional per-post confirmation, and local archives; remote posts are
 never deleted silently.</li>
@@ -672,6 +681,10 @@ in Obsidian’s secure keychain and immediately tests the connection. A
 good connection greets you by the Ghost site’s name. If two blogs
 accidentally share the same keychain secret, settings warns you, because
 the wrong key will fail with a Ghost 401.</p>
+<p>You may enter a bare address such as <code>yourblog.com</code>;
+Omnighost treats it as <code>https://yourblog.com</code>. Only specify
+<code>http://</code> deliberately when you are connecting to a local or
+otherwise non-TLS Ghost installation.</p>
 <p>For First Pair Press, think of each blog block as one public voice:
 the press site, a project site, a research notebook, a partner
 publication, or a newsletter-facing Ghost instance. Each one gets its
@@ -784,12 +797,48 @@ post by its stored id and updates it — same URL, no duplicate. You can
 also run <strong>Sync current note to ghost</strong> from the command
 palette, or use the periodic folder sync if it is enabled for that
 blog.</p>
+<p>When the managed post is already identical, Omnighost skips the Ghost
+update and reports <strong>Unchanged</strong>. By default it fetches the
+live post and compares the fields it manages, so an edit made directly
+in Ghost is detected rather than hidden by an old stored hash.</p>
+</section>
+<section id="ch011.xhtml_publication-provenance" class="level2">
+<h2 data-number="10.8" id="publication-provenance"><span
+class="header-section-number">10.8</span> Publication provenance</h2>
+<p>Omnighost calculates a canonical SHA-256 for the finished Ghost
+publication. The digest covers the title, converted body, status,
+visibility, featured flag, slug, excerpt, feature image, ordered tags,
+and scheduled time. It is stored in hidden per-post Ghost metadata,
+giving the plugin a reproducible way to decide whether the note and live
+post still agree.</p>
+<p>On desktop, Omnighost can also record the source note’s Git version.
+If the note belongs to a Git repository and has changed, the plugin
+commits that note only; it never pushes. If Git is unavailable, unsafe
+to use, or the publish happens on mobile, the publication still has its
+directly comparable SHA-256.</p>
+<p>The <strong>Publication provenance</strong> setting controls what
+readers see:</p>
+<ul>
+<li><strong>Visible version and credit</strong> shows a linked Omnighost
+credit, the Git version when available, and the publication
+SHA-256.</li>
+<li><strong>Visible credit only</strong> shows the linked credit while
+keeping version details out of the article.</li>
+<li><strong>Hidden provenance</strong> adds no reader-facing line; the
+version details remain in Ghost’s per-post code-injection metadata.</li>
+</ul>
+<p>Hidden means non-visible, not secret or cryptographically signed.
+Keep <strong>Verify published content directly</strong> on if posts may
+also be edited in Ghost. It is enabled by default and compares the
+managed live fields even when the stored hash says the post is current.
+Turning it off permits a faster hash-only check, but direct Ghost edits
+may be missed.</p>
 </section>
 <section id="ch011.xhtml_publishing-to-more-than-one-blog"
 class="level2">
-<h2 data-number="10.8"
+<h2 data-number="10.9"
 id="spreading-the-word-through-multiple-blogs"><span
-class="header-section-number">10.8</span> Spreading the word through
+class="header-section-number">10.9</span> Spreading the word through
 multiple blogs</h2>
 <p>Omnighost can manage several Ghost sites at once. For First Pair
 Press, this is the feature that turns a finished note into a real
@@ -866,8 +915,8 @@ interactive sync warns about the orphaned Ghost post. You can delete it
 on Ghost, keep it by re-adding that blog, or decide later.</p>
 </section>
 <section id="ch011.xhtml_importing-textpacks" class="level2">
-<h2 data-number="10.9" id="importing-textpacks"><span
-class="header-section-number">10.9</span> Importing textpacks</h2>
+<h2 data-number="10.10" id="importing-textpacks"><span
+class="header-section-number">10.10</span> Importing textpacks</h2>
 <p>A <strong>textpack</strong> is a small zip that bundles a Markdown
 post together with its images — the format writing apps like Ulysses use
 to move documents between devices. Omnighost imports textpacks directly,
@@ -902,6 +951,15 @@ title, tags, excerpt — embedded in the bundle’s <code>info.json</code>
 under Omnighost metadata. Packs prepared with the companion
 <code>textpack.py</code> script target the right blog by themselves:
 save the file, open Obsidian, review the draft, sync, done.</p>
+<p>Those companion-script packs can also preserve source provenance
+across the handoff. The script safely commits the source Markdown and
+referenced local images, then embeds the Git commit and a payload
+SHA-256. Omnighost verifies the payload on import. Publishing controls,
+blog routing, and Ghost id/URL write-backs do not invalidate the
+inherited source version; changing authorial metadata, body text, or
+imported asset bytes does. The Git claim is self-attested rather than a
+signature, so treat it as traceability, not proof that an untrusted pack
+came from a particular repository.</p>
 <p>This is how First Pair Press can connect repo-native writing to
 mobile publishing. A project can build a textpack with rendered
 diagrams, screenshots, and metadata; iCloud or another sync path drops
@@ -909,9 +967,23 @@ it into the vault; Omnighost imports it; the editor checks the note on
 whichever Obsidian device is in hand; and the same note can then publish
 to the press blog, the project blog, or both.</p>
 </section>
+<section id="ch011.xhtml_import-fidelity" class="level2">
+<h2 data-number="10.11" id="bringing-ghost-posts-back-cleanly"><span
+class="header-section-number">10.11</span> Bringing Ghost posts back
+cleanly</h2>
+<p>Ghost’s editor stores rich blocks rather than Markdown, so importing
+requires a conversion in the other direction. Current Omnighost keeps
+fenced code and blockquotes bounded correctly: prose, headings, and
+images that follow a Python or other code block stay outside its closing
+fence, and paragraphs after a quotation are no longer swallowed into the
+quote. Multi-paragraph quotations remain together.</p>
+<p>If an older import looks like one enormous code block or quotation,
+update Omnighost and import that Ghost post again. The repair is in the
+importer; it does not rewrite an already damaged note automatically.</p>
+</section>
 <section id="ch011.xhtml_bulk-delete-and-safe-cleanup" class="level2">
-<h2 data-number="10.10" id="bulk-delete-and-safe-cleanup"><span
-class="header-section-number">10.10</span> Bulk delete and safe
+<h2 data-number="10.12" id="bulk-delete-and-safe-cleanup"><span
+class="header-section-number">10.12</span> Bulk delete and safe
 cleanup</h2>
 <p>Publishing tools need a careful delete story. Omnighost never deletes
 remote posts silently.</p>
@@ -948,8 +1020,8 @@ Omnighost shows each post and blog name with <strong>Delete</strong>,
 </ul>
 </section>
 <section id="ch011.xhtml_when-something-goes-wrong" class="level2">
-<h2 data-number="10.11" id="when-something-goes-wrong"><span
-class="header-section-number">10.11</span> When something goes
+<h2 data-number="10.13" id="when-something-goes-wrong"><span
+class="header-section-number">10.13</span> When something goes
 wrong</h2>
 <p>Ghost validates posts, and when a field is off it returns a precise
 message. Reading that message is the fastest way to fix it:</p>
@@ -984,11 +1056,36 @@ plugin.</li>
 needs its own stored Admin API key. Paste the key into that blog’s
 <strong>Admin API key</strong> field and tap <strong>Save
 key</strong>.</li>
+<li><strong>An imported note is “chopped” or later text sits inside a
+code block or quote</strong> — update Omnighost, then re-import the
+post. Current releases close imported fenced-code and blockquote runs at
+the correct boundary.</li>
 </ul>
 </section>
+<section id="ch011.xhtml_updating-from-github" class="level2">
+<h2 data-number="10.14" id="updating-from-github"><span
+class="header-section-number">10.14</span> Updating from GitHub</h2>
+<p>BRAT remains the easiest automatic update route, but Omnighost can
+now replace its own installed bundle. Open the command palette and run
+<strong>Update from GitHub</strong>. The command downloads the current
+<code>main.js</code>, <code>manifest.json</code>, and
+<code>styles.css</code> from <code>firstpair/omnighost</code> on GitHub,
+stages all three, clears stale temporary or backup files left by an
+earlier attempt, and then replaces the installed files as one update.
+Even an unchanged file is refreshed, so the three-file bundle cannot
+become a mixture of releases.</p>
+<p>If downloading or installing any file fails, Omnighost restores the
+previous bundle. After a successful update, restart Obsidian or reload
+the app so it runs the new <code>main.js</code>.</p>
+<p>This command tracks the repository’s <strong>main branch</strong>,
+not a separately reviewed app-store release. Use it when you trust that
+repository and want its newest build. The command itself first appeared
+under the temporary name <strong>Update from Codex</strong>; current
+releases call it <strong>Update from GitHub</strong>.</p>
+</section>
 <section id="ch011.xhtml_why-updater-is-the-whole-point" class="level2">
-<h2 data-number="10.12" id="why-updating-is-the-whole-point"><span
-class="header-section-number">10.12</span> Why updating is the whole
+<h2 data-number="10.15" id="why-updating-is-the-whole-point"><span
+class="header-section-number">10.15</span> Why updating is the whole
 point</h2>
 <p>Plenty of tools can <em>post</em> from a note. The hard part — and
 the reason this plugin exists — is <em>re-posting the same note without
