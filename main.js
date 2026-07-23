@@ -4319,8 +4319,8 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
       }
     });
     this.addCommand({
-      id: "update-from-codex",
-      name: "Update from codex",
+      id: "update-from-github",
+      name: "Update from GitHub",
       callback: () => {
         void this.updateFromCodex();
       }

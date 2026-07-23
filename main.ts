@@ -213,8 +213,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		});
 
 		this.addCommand({
-			id: 'update-from-codex',
-			name: 'Update from codex',
+			id: 'update-from-github',
+			name: 'Update from GitHub',
 			callback: () => { void this.updateFromCodex(); }
 		});
 
