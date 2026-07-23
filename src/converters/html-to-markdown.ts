@@ -22,7 +22,9 @@ export function htmlToMarkdown(html: string): string {
 		/<pre[^>]*><code(?:\s+class="language-([^"]*)")?[^>]*>([\s\S]*?)<\/code><\/pre>/gi,
 		(_: string, lang: string | undefined, code: string) => {
 			const language = lang ?? '';
-			return `\`\`\`${language}\n${unescapeHtml(code.trim())}\n\`\`\``;
+			// Keep the closing fence on its own line. Without the trailing blank
+			// line, the next Ghost block is appended to the fence and remains code.
+			return `\`\`\`${language}\n${unescapeHtml(code.trim())}\n\`\`\`\n\n`;
 		}
 	);
 

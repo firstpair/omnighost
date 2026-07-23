@@ -1,6 +1,6 @@
 {
 	"name": "omnighost",
-	"version": "0.14.0",
+	"version": "0.14.1",
 	"description": "Publish and update Ghost CMS posts from Obsidian on desktop and iOS — image upload, in-place updates, scheduling and YAML metadata control.",
 	"author": "Alexy Khrabrov",
 	"main": "main.js",

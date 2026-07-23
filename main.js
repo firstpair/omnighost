@@ -1447,7 +1447,9 @@ function htmlToMarkdown(html) {
       const language = lang != null ? lang : "";
       return `\`\`\`${language}
 ${unescapeHtml(code.trim())}
-\`\`\``;
+\`\`\`
+
+`;
     }
   );
   md = md.replace(/<h1[^>]*>([\s\S]*?)<\/h1>/gi, (_, t) => `# ${stripTags(t).trim()}
