@@ -366,7 +366,7 @@ The flow is worth understanding because it explains the whole plugin:
 The current Omnighost is no longer just a “send this note to Ghost” button. It is a full publishing manager for a small press that writes in public:
 
 - **Publish from any Obsidian platform.** Draft on desktop, revise on iPad, finish on iPhone, and sync from the same vault.
-- **Manage many Ghost blogs.** Add one blog per publication channel, each with its own site URL, Admin API key, folder, automatic sync setting, and interval.
+- **Manage many Ghost blogs.** Add one blog per publication channel, each with its own site URL, Admin API key or staff access token, folder, automatic sync setting, and interval.
 - **Choose one blog or many.** Use `g_blog`, the blog picker, or folder routing to decide whether a note goes to one site, several sites, or none.
 - **Update in place.** Omnighost stores per-blog Ghost ids and public URLs, so repeated syncs revise the live posts instead of making duplicates.
 - **Publish images.** Local Markdown images and Obsidian image embeds upload to Ghost, then the note is rewritten to use the hosted image URLs.
@@ -406,12 +406,19 @@ In **Settings → Omnighost**, the first section is **Ghost blogs**. Add one blo
 
 - a display **Name**;
 - a **Site address** such as `https://yourblog.com`;
-- an **Admin API Key**, which you create in Ghost admin under *Settings → Integrations → Add custom integration* and paste into that blog’s key field;
+- a **Use staff access token** toggle, off by default;
+- an **Admin API key** or **Staff access token** credential field, selected by that toggle;
 - a vault **Folder** for that blog’s posts;
 - an **Auto-sync this folder** toggle; and
 - an optional per-blog **Sync interval**.
 
-Tap **Save key** for each blog. Omnighost stores the key in Obsidian’s secure keychain and immediately tests the connection. A good connection greets you by the Ghost site’s name. If two blogs accidentally share the same keychain secret, settings warns you, because the wrong key will fail with a Ghost 401.
+Leave **Use staff access token** off for the usual integration path. Create a custom integration under **Ghost Admin → Settings → Integrations**, copy its **Admin API key**, and paste it into the blog’s credential field. Omnighost authenticates as that integration, with Ghost’s standard integration permissions.
+
+Turn **Use staff access token** on when Omnighost should act as a particular Ghost staff member. Copy that user’s token from their profile page and paste it into the now-labelled **Staff access token** field. Requests then use that staff member’s role permissions: for example, a Contributor cannot publish, while Authors and more privileged roles can. This is useful when authorship and least-privilege access should follow a real editorial identity rather than a site-wide integration.
+
+Both credentials use Ghost’s `id:secret` form. Tap **Save key** for each blog. Omnighost stores the credential in Obsidian’s secure keychain and immediately tests the connection. A good connection greets you by the Ghost site’s name. If two blogs accidentally share the same keychain secret, settings warns you, because the wrong credential will fail with a Ghost 401.
+
+Authentication mode belongs to each blog. Existing blogs and newly added blogs default to **Admin API key**, and toggling one blog to staff access does not affect the others. Adding a blog or changing the staff-access toggle redraws the settings controls without jumping the pane back to the top, so you stay with the blog you are editing.
 
 You may enter a bare address such as `yourblog.com`; Omnighost treats it as `https://yourblog.com`. Only specify `http://` deliberately when you are connecting to a local or otherwise non-TLS Ghost installation.
 
@@ -504,7 +511,7 @@ Omnighost can manage several Ghost sites at once. For First Pair Press, this is 
 
 ![One note can route through Omnighost to several Ghost blogs, each with its own folder, key, and post identity.](docs/book/diagrams/multi-blog-routing.png)
 
-In **Settings → Omnighost**, the **Ghost blogs** section lets you **Add blog**. Each one gets its own name, site address, Admin API key (a keychain secret), folder in your vault, sync toggle, and optional interval. One blog is marked the default (★), and a **Test** button confirms each connection by name.
+In **Settings → Omnighost**, the **Ghost blogs** section lets you **Add blog**. Each one gets its own name, site address, authentication mode and credential (stored as a keychain secret), folder in your vault, sync toggle, and optional interval. Admin API key authentication is the default; turn on **Use staff access token** only for blogs that should publish with a staff member’s role permissions. One blog is marked the default (★), and a **Test** button confirms each connection by name.
 
 Blog folders nest under one root. By default each blog’s folder derives from its site address as **`Ghost Posts/<domain>`** — `Ghost Posts/chief.sc`, `Ghost Posts/collected.ga` — so all your publishing lives under a single top-level folder. Leave a blog’s **Folder** field blank for the automatic path, or type your own to override it. If your blogs predate this layout and sit in scattered folders, the **Organize folders by domain** button in settings moves every blog’s notes (archives included) into place with links intact, and re-points the folders — nothing changes until you confirm.
 
@@ -595,11 +602,11 @@ Ghost validates posts, and when a field is off it returns a precise message. Rea
 
 A few common cases and what they mean:
 
-- **“Successfully connected” shows the wrong name, or connection fails** — that blog’s Ghost URL or Admin API Key is wrong. Re-enter them in the blog block; the greeting confirms the right site.
+- **“Successfully connected” shows the wrong name, or connection fails** — check that blog’s Ghost URL, **Use staff access token** toggle, and credential. An Admin API key entered while Staff mode is on — or the reverse — will not authenticate correctly. Re-enter the matching credential in the blog block; the greeting confirms the right site.
 - **A slug-length error** (as pictured) — the note had no heading, so the title fell back to a long first paragraph. Give the note a short `# Heading` or set `g_slug` explicitly.
 - **The post looks “paywalled” but you set it public** — check the body: if the *content* is visible and only a *Subscribe* box sits at the bottom, that box is Ghost’s normal newsletter call-to-action on public posts, not a lock. Confirm the visibility in Ghost admin to be sure.
 - **It shows “Published” but you got an error** — newer versions tie the green “Published” badge to a real published URL, so a failed sync won’t falsely show green. If yours does, update the plugin.
-- **A blog sync says the key is missing** — each blog needs its own stored Admin API key. Paste the key into that blog’s **Admin API key** field and tap **Save key**.
+- **A blog sync says the key is missing** — each blog needs its own stored credential. Leave Staff mode off and paste an integration key into **Admin API key**, or turn Staff mode on and paste the user token into **Staff access token**, then tap **Save key**.
 - **An imported note is “chopped” or later text sits inside a code block or quote** — update Omnighost, then re-import the post. Current releases close imported fenced-code and blockquote runs at the correct boundary.
 
 </div>
