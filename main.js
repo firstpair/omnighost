@@ -6933,6 +6933,18 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
     super(app, plugin);
     this.plugin = plugin;
   }
+  /** Redraw settings without sending the user back to the top of the pane. */
+  redisplayPreservingScroll() {
+    let scrollEl = this.containerEl;
+    while (scrollEl.parentElement && !(scrollEl.scrollHeight > scrollEl.clientHeight && scrollEl.clientHeight > 0)) {
+      scrollEl = scrollEl.parentElement;
+    }
+    const scrollTop = scrollEl.scrollTop;
+    this.display();
+    window.requestAnimationFrame(() => {
+      scrollEl.scrollTop = scrollTop;
+    });
+  }
   /** Render the multi-blog manager: one editable block per blog, plus "Add blog". */
   renderBlogsSettings(containerEl) {
     const plugin = this.plugin;
@@ -6960,7 +6972,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
       new import_obsidian12.Setting(containerEl).setHeading().setName(`${blog.name || "Untitled blog"}${isDefault ? "  \u2605 default" : ""}`).addExtraButton((b) => b.setIcon("star").setTooltip("Set as default").onClick(async () => {
         plugin.settings.defaultBlogId = blog.id;
         await plugin.saveSettings();
-        this.display();
+        this.redisplayPreservingScroll();
       })).addExtraButton((b) => b.setIcon("trash").setTooltip("Remove blog").onClick(async () => {
         var _a2, _b;
         plugin.settings.blogs = plugin.settings.blogs.filter((x) => x.id !== blog.id);
@@ -6968,7 +6980,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
           plugin.settings.defaultBlogId = (_b = (_a2 = plugin.settings.blogs[0]) == null ? void 0 : _a2.id) != null ? _b : "";
         }
         await plugin.saveSettings();
-        this.display();
+        this.redisplayPreservingScroll();
       }));
       new import_obsidian12.Setting(containerEl).setName("Name").addText((t) => {
         let originalName = blog.name;
@@ -7046,7 +7058,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
         return t.setValue(((_a2 = blog.authMode) != null ? _a2 : "admin") === "staff").onChange(async (v) => {
           blog.authMode = v ? "staff" : "admin";
           await plugin.saveSettings();
-          this.display();
+          this.redisplayPreservingScroll();
         });
       });
       const credentialLabel = ((_a = blog.authMode) != null ? _a : "admin") === "staff" ? "Staff access token" : "Admin API key";
@@ -7144,7 +7156,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
       if (!plugin.settings.defaultBlogId)
         plugin.settings.defaultBlogId = blog.id;
       await plugin.saveSettings();
-      this.display();
+      this.redisplayPreservingScroll();
     }));
     new import_obsidian12.Setting(containerEl).setName("Organize folders by domain").setDesc(`Move each blog's notes into ${plugin.ghostPostsRoot()}/<domain> (derived from its site address) and point the blog folders there. Notes are moved with link updates.`).addButton((b) => b.setButtonText("Organize").onClick(() => {
       new SimpleConfirmModal(
@@ -7158,7 +7170,7 @@ var GhostWriterSettingTab = class extends import_obsidian12.PluginSettingTab {
           void (async () => {
             const { moved, failed } = await plugin.organizeBlogFolders();
             new import_obsidian12.Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED \u2014 those notes stayed put, see console` : ""}`);
-            this.display();
+            this.redisplayPreservingScroll();
           })();
         }
       ).open();

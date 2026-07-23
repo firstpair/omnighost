@@ -2876,6 +2876,22 @@ class GhostWriterSettingTab extends PluginSettingTab {
 		this.plugin = plugin;
 	}
 
+	/** Redraw settings without sending the user back to the top of the pane. */
+	private redisplayPreservingScroll(): void {
+		let scrollEl: HTMLElement = this.containerEl;
+		while (
+			scrollEl.parentElement
+			&& !(scrollEl.scrollHeight > scrollEl.clientHeight && scrollEl.clientHeight > 0)
+		) {
+			scrollEl = scrollEl.parentElement;
+		}
+		const scrollTop = scrollEl.scrollTop;
+		this.display();
+		window.requestAnimationFrame(() => {
+			scrollEl.scrollTop = scrollTop;
+		});
+	}
+
 	/** Render the multi-blog manager: one editable block per blog, plus "Add blog". */
 	private renderBlogsSettings(containerEl: HTMLElement): void {
 		const plugin = this.plugin;
@@ -2905,7 +2921,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 				.addExtraButton(b => b
 					.setIcon('star')
 					.setTooltip('Set as default')
-					.onClick(async () => { plugin.settings.defaultBlogId = blog.id; await plugin.saveSettings(); this.display(); }))
+					.onClick(async () => { plugin.settings.defaultBlogId = blog.id; await plugin.saveSettings(); this.redisplayPreservingScroll(); }))
 				.addExtraButton(b => b
 					.setIcon('trash')
 					.setTooltip('Remove blog')
@@ -2915,7 +2931,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 							plugin.settings.defaultBlogId = plugin.settings.blogs[0]?.id ?? '';
 						}
 						await plugin.saveSettings();
-						this.display();
+						this.redisplayPreservingScroll();
 					}));
 
 			new Setting(containerEl).setName('Name')
@@ -3001,7 +3017,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 					.onChange(async v => {
 						blog.authMode = v ? 'staff' : 'admin';
 						await plugin.saveSettings();
-						this.display();
+						this.redisplayPreservingScroll();
 					}));
 			const credentialLabel = (blog.authMode ?? 'admin') === 'staff' ? 'Staff access token' : 'Admin API key';
 			const keySetting = new Setting(containerEl).setName(credentialLabel);
@@ -3094,7 +3110,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 			plugin.settings.blogs.push(blog);
 			if (!plugin.settings.defaultBlogId) plugin.settings.defaultBlogId = blog.id;
 			await plugin.saveSettings();
-			this.display();
+			this.redisplayPreservingScroll();
 		}));
 
 		new Setting(containerEl)
@@ -3111,7 +3127,7 @@ class GhostWriterSettingTab extends PluginSettingTab {
 						void (async () => {
 							const { moved, failed } = await plugin.organizeBlogFolders();
 							new Notice(`Organized: ${moved} note(s) moved${failed ? `, ${failed} FAILED — those notes stayed put, see console` : ''}`);
-							this.display();
+							this.redisplayPreservingScroll();
 						})();
 					}
 				).open();
