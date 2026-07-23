@@ -55,7 +55,7 @@ export function htmlToMarkdown(html: string): string {
 	// Unordered
 	md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner: string) => {
 		return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, item: string) =>
-			`- ${stripTags(item).trim()}`
+			`- ${listItemToMarkdown(item)}\n`
 		) + '\n';
 	});
 
@@ -63,7 +63,7 @@ export function htmlToMarkdown(html: string): string {
 	md = md.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner: string) => {
 		let index = 1;
 		return inner.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, item: string) =>
-			`${index++}. ${stripTags(item).trim()}`
+			`${index++}. ${listItemToMarkdown(item)}\n`
 		) + '\n';
 	});
 
@@ -125,6 +125,23 @@ export function htmlToMarkdown(html: string): string {
  */
 function stripTags(html: string): string {
 	return html.replace(/<[^>]+>/g, '');
+}
+
+/**
+ * Normalize Ghost list item HTML before the generic inline conversion pass.
+ *
+ * Ghost commonly wraps list item content in paragraph tags. If those tags are
+ * stripped before list items are separated, adjacent items collapse together
+ * during import. Keep inline tags intact so the later inline-formatting pass
+ * can still turn links/emphasis/code into Markdown.
+ */
+function listItemToMarkdown(html: string): string {
+	return html
+		.replace(/<\/p>\s*<p[^>]*>/gi, ' ')
+		.replace(/<\/?p[^>]*>/gi, '')
+		.replace(/<br[^>]*\/?>/gi, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 }
 
 /**

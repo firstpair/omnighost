@@ -29,3 +29,21 @@ void test('preserves separate paragraphs inside a Ghost blockquote', () => {
 		'> First quoted paragraph.\n>\n> Second quoted paragraph.\n\nOutside.'
 	);
 });
+
+void test('imports Ghost HTML unordered lists as separate Markdown items', () => {
+	const html = '<p>Before.</p><ul><li><p>First item</p></li><li><p>Second <strong>item</strong></p></li></ul><p>After.</p>';
+
+	assert.equal(
+		htmlToMarkdown(html),
+		'Before.\n\n- First item\n- Second **item**\n\nAfter.'
+	);
+});
+
+void test('imports Ghost HTML ordered lists as separate Markdown items', () => {
+	const html = '<ol><li><p>Alpha</p></li><li><p>Beta with <a href="https://example.com">link</a></p></li></ol>';
+
+	assert.equal(
+		htmlToMarkdown(html),
+		'1. Alpha\n2. Beta with [link](https://example.com)'
+	);
+});
