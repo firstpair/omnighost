@@ -1474,14 +1474,16 @@ ${unescapeHtml(code.trim())}
   md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
     return inner.replace(
       /<li[^>]*>([\s\S]*?)<\/li>/gi,
-      (_m, item) => `- ${stripTags(item).trim()}`
+      (_m, item) => `- ${listItemToMarkdown(item)}
+`
     ) + "\n";
   });
   md = md.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_, inner) => {
     let index = 1;
     return inner.replace(
       /<li[^>]*>([\s\S]*?)<\/li>/gi,
-      (_m, item) => `${index++}. ${stripTags(item).trim()}`
+      (_m, item) => `${index++}. ${listItemToMarkdown(item)}
+`
     ) + "\n";
   });
   md = md.replace(/<img[^>]+src="([^"]*)"[^>]*alt="([^"]*)"[^>]*\/?>/gi, "![$2]($1)");
@@ -1519,6 +1521,9 @@ ${unescapeHtml(code.trim())}
 }
 function stripTags(html) {
   return html.replace(/<[^>]+>/g, "");
+}
+function listItemToMarkdown(html) {
+  return html.replace(/<\/p>\s*<p[^>]*>/gi, " ").replace(/<\/?p[^>]*>/gi, "").replace(/<br[^>]*\/?>/gi, " ").replace(/\s+/g, " ").trim();
 }
 function unescapeHtml(text) {
   return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, " ").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&hellip;/g, "\u2026").replace(/&ldquo;/g, '"').replace(/&rdquo;/g, '"').replace(/&lsquo;/g, "'").replace(/&rsquo;/g, "'");
