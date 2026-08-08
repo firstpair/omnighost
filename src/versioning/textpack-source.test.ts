@@ -89,6 +89,11 @@ void test('inherits a textpack Git version across publishing and Ghost write-bac
 		g_id: 'legacy-id',
 		g_url: 'https://example.com/ghost/#/editor/post/legacy-id',
 		g_public_url: 'https://example.com/imported/',
+		g_provenance_override: true,
+		g_provenance_visibility: 'visible-credit',
+		g_provenance_delimiter: 'single',
+		g_provenance_size: 'small',
+		g_provenance_italic: true,
 		g_id_example_com: 'domain-id',
 		g_url_example_com: 'https://example.com/ghost/#/editor/post/domain-id',
 		g_public_url_example_com: 'https://example.com/imported/'

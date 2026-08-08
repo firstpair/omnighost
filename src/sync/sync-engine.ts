@@ -8,7 +8,11 @@ import { markdownToLexical } from '../converters/markdown-to-lexical';
 import { processPostImages } from '../ghost/image-uploader';
 import { buildGhostEditorUrl, ghostHostname, normalizeGhostSiteUrl } from '../ghost/url';
 import { analyzeTitleSources, resolvePrimaryTitle, updateSecondaryTitle } from '../title-policy';
-import { preparePublicationProvenance, stripRenderedPublicationProvenanceHtml } from '../versioning/publication-provenance';
+import {
+	preparePublicationProvenance,
+	resolvePublicationProvenanceImprint,
+	stripRenderedPublicationProvenanceHtml
+} from '../versioning/publication-provenance';
 import type { NoteVersionResult } from '../versioning/note-version';
 
 /**
@@ -306,12 +310,24 @@ export class SyncEngine {
 				postData.published_at = publishedAt;
 			}
 
+			const provenanceImprint = resolvePublicationProvenanceImprint(
+				metadata.provenance_override,
+				metadata.provenance_visibility,
+				this.settings.publicationProvenanceVisibility,
+				{
+					delimiter: metadata.provenance_delimiter,
+					fontSize: metadata.provenance_size,
+					italic: metadata.provenance_italic
+				},
+				status === 'draft'
+			);
 			const preparedProvenance = await preparePublicationProvenance(
 				postData,
-				status === 'draft' ? 'hidden' : this.settings.publicationProvenanceVisibility,
+				provenanceImprint.visibility,
 				noteVersion?.kind === 'git'
 					? { gitCommit: noteVersion.commit }
-					: {}
+					: {},
+				provenanceImprint.presentation
 			);
 			postData.lexical = preparedProvenance.lexical;
 			postData.codeinjection_head = preparedProvenance.hiddenBlock;
@@ -355,7 +371,8 @@ export class SyncEngine {
 				// Update existing post (matched by ghost_id or adopted via slug)
 				console.debug(`[Ghost Sync] Updating post ${targetId}`);
 				const updateResult = await this.ghostClient.updatePost(targetId, postData, {
-					visibility: status === 'draft' ? 'hidden' : this.settings.publicationProvenanceVisibility,
+					visibility: provenanceImprint.visibility,
+					presentation: provenanceImprint.presentation,
 					verifyRemoteContent: this.settings.verifyGhostContentOnSync,
 					allowedExistingGitCommit: noteVersion?.kind === 'git'
 						? noteVersion.previousNoteCommit

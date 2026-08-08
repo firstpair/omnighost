@@ -53,7 +53,7 @@ src/
 4. **YAML Control**: All Ghost metadata managed via configurable prefixed YAML properties (default: `g_`)
 5. **Sync Folder**: Isolated folder in vault for Ghost-synced posts only
 6. **Calendar View**: `ItemView` in sidebar, loads posts via Ghost API filtered by month, status dots via CSS pseudo-elements
-7. **Publication Provenance**: Canonical SHA-256 metadata is stored in each post's `codeinjection_head`; desktop publishing commits the note when Git is safely available, with hash-only fallback on mobile or Git failure. A three-mode setting controls the trailing reader-visible credit/version line, and direct managed-field verification remains available as an enabled-by-default safeguard against edits made directly in Ghost.
+7. **Publication Provenance**: Canonical SHA-256 metadata is stored in each post's `codeinjection_head`; desktop publishing commits the note when Git is safely available, with hash-only fallback on mobile or Git failure. The blog/global imprint defaults to tiny text under a double rule. A per-note `provenance_override` toggle gates visibility, divider, size, and italic overrides in the modal; when it is off those stored choices are ignored. The visible line is one sentinel-owned Lexical HTML card so Ghost preserves its styling, while direct managed-field verification remains available as an enabled-by-default safeguard against edits made directly in Ghost.
 8. **Textpack Provenance**: `scripts/textpack.py` safely commits exact source inputs and embeds a portable payload digest. Import verifies and fingerprints that source so untouched notes reuse its Git commit; authorial or imported-asset changes invalidate inheritance.
 
 ## Development Workflow

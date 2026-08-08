@@ -1786,20 +1786,25 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		}
 		const md = parseGhostMetadata(fmObj, prefix);
 
-		const status: GhostPropsForm['status'] = !md?.published
-			? 'draft'
-			: (md.published_at ? 'schedule' : 'publish');
+		const status: GhostPropsForm['status'] = md
+			? (!md.published ? 'draft' : (md.published_at ? 'schedule' : 'publish'))
+			: 'publish';
 
 		const initial: GhostPropsForm = {
 			status,
 			visibility: md?.post_access ?? 'public',
 			featured: md?.featured ?? false,
-			coverFromFirstImage: md?.cover_from_first_image ?? false,
+			coverFromFirstImage: md?.cover_from_first_image ?? true,
 			publishedAt: md?.published_at ?? '',
 			excerpt: md?.excerpt ?? '',
 			tags: (md?.tags ?? []).join(', '),
 			slug: md?.slug ?? '',
 			featureImage: md?.feature_image ?? '',
+			provenanceOverride: md?.provenance_override ?? false,
+			provenanceVisibility: md?.provenance_visibility ?? 'default',
+			provenanceDelimiter: md?.provenance_delimiter ?? 'double',
+			provenanceFontSize: md?.provenance_size ?? 'tiny',
+			provenanceItalic: md?.provenance_italic ?? false,
 			blogIds: this.resolveBlogsForFile(file).map(b => b.id)
 		};
 
@@ -1821,7 +1826,12 @@ export default class GhostWriterManagerPlugin extends Plugin {
 				excerpt: yamlString(form.excerpt, true),
 				feature_image: yamlString(form.featureImage, true),
 				slug: yamlString(form.slug, true),
-				tags: tagsYaml
+				tags: tagsYaml,
+				provenance_override: form.provenanceOverride ? 'true' : 'false',
+				provenance_visibility: form.provenanceVisibility,
+				provenance_delimiter: form.provenanceDelimiter,
+				provenance_size: form.provenanceFontSize,
+				provenance_italic: form.provenanceItalic ? 'true' : 'false'
 			};
 			const selectedBlogs = form.blogIds
 				.map(id => this.settings.blogs.find(b => b.id === id))

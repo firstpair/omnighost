@@ -273,7 +273,12 @@ function isOperationalFrontmatterKey(key: string, prefix: string): boolean {
 		'url',
 		'public_url',
 		'ids',
-		'public_urls'
+		'public_urls',
+		'provenance_override',
+		'provenance_visibility',
+		'provenance_delimiter',
+		'provenance_size',
+		'provenance_italic'
 	].includes(suffix)) return true;
 	return suffix.startsWith('id_') || suffix.startsWith('url_') || suffix.startsWith('public_url_');
 }

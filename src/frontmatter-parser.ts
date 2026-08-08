@@ -1,4 +1,9 @@
-import { GhostPostAccess } from './types';
+import type {
+	GhostPostAccess,
+	PublicationProvenanceDelimiter,
+	PublicationProvenanceFontSize,
+	PublicationProvenanceVisibilityOverride
+} from './types';
 
 /**
  * Ghost metadata extracted from frontmatter
@@ -13,6 +18,11 @@ export interface GhostMetadata {
 	feature_image: string;
 	no_sync: boolean;
 	cover_from_first_image: boolean; // when true, the first body image becomes the cover and is removed
+	provenance_override: boolean;
+	provenance_visibility: PublicationProvenanceVisibilityOverride;
+	provenance_delimiter: PublicationProvenanceDelimiter;
+	provenance_size: PublicationProvenanceFontSize;
+	provenance_italic: boolean;
 	ghost_id?: string; // Ghost post ID if already synced
 	slug?: string; // Custom slug
 	ghost_url?: string; // Ghost editor URL for this post
@@ -203,16 +213,17 @@ export function parseGhostMetadata(
 	}
 
 	// Parse boolean values properly (Obsidian can store as true/false or "true"/"false")
-	const parseBool = (value: unknown): boolean => {
+	const parseBool = (value: unknown, fallback = false): boolean => {
 		if (typeof value === 'boolean') return value;
 		if (typeof value === 'string') return value.toLowerCase() === 'true';
+		if (value === null || value === undefined) return fallback;
 		return Boolean(value);
 	};
 
 	const featured = parseBool(get('featured'));
-	const published = parseBool(get('published'));
+	const published = parseBool(get('published'), true);
 	const no_sync = parseBool(get('no_sync'));
-	const cover_from_first_image = parseBool(get('cover_from_first_image'));
+	const cover_from_first_image = parseBool(get('cover_from_first_image'), true);
 
 	console.debug('[Ghost Parse] Featured value:', get('featured'), '=> parsed:', featured);
 	console.debug('[Ghost Parse] Published value:', get('published'), '=> parsed:', published);
@@ -228,6 +239,29 @@ export function parseGhostMetadata(
 	console.debug('[Ghost Parse] Excerpt raw value:', get('excerpt'));
 	const excerpt = toSafeString(get('excerpt'));
 	const feature_image = toSafeString(get('feature_image'));
+	const rawProvenanceOverride = get('provenance_override');
+	const provenance_override = rawProvenanceOverride === true
+		|| (typeof rawProvenanceOverride === 'string' && rawProvenanceOverride.trim().toLowerCase() === 'true');
+	const rawProvenanceVisibility = toSafeString(get('provenance_visibility')).toLowerCase();
+	const provenance_visibility: PublicationProvenanceVisibilityOverride =
+		rawProvenanceVisibility === 'visible-hash'
+		|| rawProvenanceVisibility === 'visible-credit'
+		|| rawProvenanceVisibility === 'hidden'
+			? rawProvenanceVisibility
+			: 'default';
+	const rawProvenanceDelimiter = toSafeString(get('provenance_delimiter')).toLowerCase();
+	const provenance_delimiter: PublicationProvenanceDelimiter =
+		rawProvenanceDelimiter === 'none' || rawProvenanceDelimiter === 'single'
+			? rawProvenanceDelimiter
+			: 'double';
+	const rawProvenanceSize = toSafeString(get('provenance_size')).toLowerCase();
+	const provenance_size: PublicationProvenanceFontSize =
+		rawProvenanceSize === 'normal' || rawProvenanceSize === 'small'
+			? rawProvenanceSize
+			: 'tiny';
+	const rawProvenanceItalic = get('provenance_italic');
+	const provenance_italic = rawProvenanceItalic === true
+		|| (typeof rawProvenanceItalic === 'string' && rawProvenanceItalic.trim().toLowerCase() === 'true');
 
 	console.debug('[Ghost Parse] Excerpt parsed:', excerpt, '(length:', excerpt.length, ')');
 
@@ -245,6 +279,11 @@ export function parseGhostMetadata(
 		feature_image,
 		no_sync,
 		cover_from_first_image,
+		provenance_override,
+		provenance_visibility,
+		provenance_delimiter,
+		provenance_size,
+		provenance_italic,
 		ghost_id: get('id') ? String(get('id')) : undefined,
 		slug: get('slug') ? String(get('slug')) : undefined,
 		ghost_url: get('url') ? String(get('url')) : undefined,

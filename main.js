@@ -40,6 +40,11 @@ module.exports = __toCommonJS(main_exports);
 var import_obsidian12 = require("obsidian");
 
 // src/types.ts
+var DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION = {
+  delimiter: "double",
+  fontSize: "tiny",
+  italic: false
+};
 var DEFAULT_SETTINGS = {
   blogs: [],
   defaultBlogId: "",
@@ -157,7 +162,7 @@ function extractTrailingVisiblePublicationProvenance(lexical) {
   const children = lexicalChildren(document2);
   if (children.length === 0)
     return null;
-  return classifyProvenanceParagraph(children[children.length - 1]);
+  return classifyProvenanceNode(children[children.length - 1]);
 }
 function publicationLexicalDocumentsEqual(left, right) {
   var _a, _b;
@@ -168,6 +173,25 @@ function publicationLexicalDocumentsEqual(left, right) {
   return stableJsonStringify((_a = leftStripped.visible) != null ? _a : null) === stableJsonStringify((_b = rightStripped.visible) != null ? _b : null);
 }
 function stripRenderedPublicationProvenanceHtml(html) {
+  var _a;
+  const cardMarker = '<div data-omnighost-provenance="v1"';
+  const cardStart = html.toLowerCase().lastIndexOf(cardMarker);
+  if (cardStart !== -1) {
+    const cardEndMarker = "</div>";
+    const cardEnd = html.indexOf(cardEndMarker, cardStart);
+    if (cardEnd !== -1) {
+      const candidateEnd = cardEnd + cardEndMarker.length;
+      const suffix = html.slice(candidateEnd);
+      if (/^(?:\s*<!--kg-card-end:\s*html-->)?\s*$/i.test(suffix)) {
+        const candidate = html.slice(cardStart, candidateEnd);
+        if (classifyProvenanceHtml(candidate)) {
+          const before = html.slice(0, cardStart);
+          const wrapper = /<!--kg-card-begin:\s*html-->\s*$/i.exec(before);
+          return html.slice(0, (_a = wrapper == null ? void 0 : wrapper.index) != null ? _a : cardStart);
+        }
+      }
+    }
+  }
   const paragraphStart = html.toLowerCase().lastIndexOf("<p");
   if (paragraphStart === -1)
     return html;
@@ -190,13 +214,17 @@ function stripRenderedPublicationProvenanceHtml(html) {
   }
   return html;
 }
-function applyVisiblePublicationProvenance(lexical, visibility, provenance) {
+function applyVisiblePublicationProvenance(lexical, visibility, provenance, presentation = DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION) {
   const document2 = parseLexicalDocument(lexical);
   const removed = stripTrailingProvenanceNode(document2) !== null;
   if (visibility === "hidden") {
     return removed ? JSON.stringify(document2) : lexical;
   }
-  lexicalChildren(document2).push(createVisibleProvenanceParagraph(visibility, provenance));
+  lexicalChildren(document2).push(createVisibleProvenanceCard(
+    visibility,
+    provenance,
+    normalizePublicationProvenancePresentation(presentation)
+  ));
   return JSON.stringify(document2);
 }
 function buildHiddenPublicationProvenance(provenance) {
@@ -281,13 +309,13 @@ function storedPublicationProvenanceMatches(currentLexical, currentCodeInjection
   const currentVisible = extractTrailingVisiblePublicationProvenance(currentLexical);
   return stableJsonStringify(desiredVisible) === stableJsonStringify(currentVisible);
 }
-async function preparePublicationProvenance(publication, visibility, version = {}) {
+async function preparePublicationProvenance(publication, visibility, version = {}, presentation = DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION) {
   const publicationSha256 = await hashManagedPublication(publication);
   const provenance = createPublicationProvenance(publicationSha256, version);
   return {
     publicationSha256,
     provenance,
-    lexical: applyVisiblePublicationProvenance(publication.lexical, visibility, provenance),
+    lexical: applyVisiblePublicationProvenance(publication.lexical, visibility, provenance, presentation),
     hiddenBlock: buildHiddenPublicationProvenance(provenance)
   };
 }
@@ -296,7 +324,8 @@ async function compareManagedPublicationState(options) {
   const desired = await preparePublicationProvenance(
     options.desired,
     options.visibility,
-    { gitCommit: options.gitCommit }
+    { gitCommit: options.gitCommit },
+    options.presentation
   );
   const currentSha256 = await hashManagedPublication(options.current);
   const embedded = extractHiddenPublicationProvenance(options.currentCodeInjectionHead);
@@ -386,13 +415,63 @@ function stripTrailingProvenanceNode(document2) {
   const children = lexicalChildren(document2);
   if (children.length === 0)
     return null;
-  const visible = classifyProvenanceParagraph(children[children.length - 1]);
+  const visible = classifyProvenanceNode(children[children.length - 1]);
   if (!visible)
     return null;
   children.pop();
   return visible;
 }
-function classifyProvenanceParagraph(node) {
+function classifyProvenanceNode(node) {
+  if (isRecord(node) && node.type === "html" && typeof node.html === "string") {
+    return classifyProvenanceHtml(node.html);
+  }
+  return classifyLegacyProvenanceParagraph(node);
+}
+function classifyProvenanceHtml(html) {
+  const outer = /^<div data-omnighost-provenance="v1" data-omnighost-mode="(visible-hash|visible-credit)" data-omnighost-delimiter="(none|single|double)" data-omnighost-size="(normal|small|tiny)" data-omnighost-italic="(true|false)">([\s\S]*)<\/div>$/.exec(html);
+  if (!outer)
+    return null;
+  const mode = outer[1];
+  const presentation = {
+    delimiter: outer[2],
+    fontSize: outer[3],
+    italic: outer[4] === "true"
+  };
+  const inner = outer[5];
+  const repositoryLink = `<a href="${OMNIGHOST_REPOSITORY_URL}" rel="noopener">omnighost</a>`;
+  if (!inner.includes(repositoryLink))
+    return null;
+  const text = decodeRenderedHtmlText(inner.replace(/<[^>]*>/g, ""));
+  let publicationSha256;
+  let gitCommitDisplay;
+  if (mode === "visible-credit") {
+    if (text !== "published with omnighost")
+      return null;
+  } else {
+    const full = text.match(
+      /^published with omnighost(?: · Git ([0-9a-f]{7,64}))? · SHA-256 ([0-9a-f]{64})$/
+    );
+    if (!full)
+      return null;
+    gitCommitDisplay = full[1];
+    publicationSha256 = full[2];
+  }
+  const expected = createVisibleProvenanceHtml(
+    mode,
+    publicationSha256,
+    gitCommitDisplay,
+    presentation
+  );
+  if (html !== expected)
+    return null;
+  return {
+    mode,
+    presentation,
+    ...publicationSha256 ? { publicationSha256 } : {},
+    ...gitCommitDisplay ? { gitCommitDisplay } : {}
+  };
+}
+function classifyLegacyProvenanceParagraph(node) {
   if (!isRecord(node) || node.type !== "paragraph" || !Array.isArray(node.children))
     return null;
   const links = collectLinkNodes(node.children);
@@ -400,7 +479,10 @@ function classifyProvenanceParagraph(node) {
     return null;
   const text = collectLexicalText(node);
   if (text === "published with omnighost") {
-    return { mode: "visible-credit" };
+    return {
+      mode: "visible-credit",
+      presentation: { delimiter: "none", fontSize: "normal", italic: false }
+    };
   }
   const full = text.match(
     /^published with omnighost(?: · Git ([0-9a-f]{7,64}))? · SHA-256 ([0-9a-f]{64})$/
@@ -409,6 +491,7 @@ function classifyProvenanceParagraph(node) {
     return null;
   return {
     mode: "visible-hash",
+    presentation: { delimiter: "none", fontSize: "normal", italic: false },
     publicationSha256: full[2],
     ...full[1] ? { gitCommitDisplay: full[1] } : {}
   };
@@ -440,50 +523,63 @@ function collectLexicalText(node) {
   }
   return text;
 }
-function createVisibleProvenanceParagraph(visibility, provenance) {
-  const children = [
-    createTextNode("published with "),
-    createLinkNode("omnighost", OMNIGHOST_REPOSITORY_URL, PROVENANCE_LINK_TITLE)
-  ];
+function createVisibleProvenanceCard(visibility, provenance, presentation) {
+  return {
+    type: "html",
+    version: 1,
+    html: createVisibleProvenanceHtml(
+      visibility,
+      visibility === "visible-hash" ? provenance.publicationSha256 : void 0,
+      visibility === "visible-hash" && provenance.gitCommit ? provenance.gitCommit.slice(0, 12) : void 0,
+      presentation
+    )
+  };
+}
+function createVisibleProvenanceHtml(visibility, publicationSha256, gitCommitDisplay, presentation) {
+  const delimiter = presentation.delimiter === "none" ? "" : `<hr data-omnighost-delimiter="${presentation.delimiter}" style="border:0;border-top:${presentation.delimiter === "double" ? "3px double" : "1px solid"} currentColor;margin:0 0 0.5em;">`;
+  const size = publicationProvenanceFontSizeCss(presentation.fontSize);
+  const paragraphStyle = `margin:0;font-size:${size};line-height:1.4;overflow-wrap:anywhere;font-style:${presentation.italic ? "italic" : "normal"};`;
+  let text = `published with <a href="${OMNIGHOST_REPOSITORY_URL}" rel="noopener">omnighost</a>`;
   if (visibility === "visible-hash") {
-    if (provenance.gitCommit) {
-      children.push(createTextNode(" \xB7 Git "));
-      const shortCommit = provenance.gitCommit.slice(0, 12);
-      children.push(createTextNode(shortCommit));
+    if (!publicationSha256 || !SHA256_PATTERN.test(publicationSha256)) {
+      throw new Error("Visible publication provenance requires a valid SHA-256 digest");
     }
-    children.push(createTextNode(` \xB7 SHA-256 ${provenance.publicationSha256}`));
+    if (gitCommitDisplay)
+      text += ` \xB7 Git ${gitCommitDisplay}`;
+    text += ` \xB7 SHA-256 ${publicationSha256}`;
   }
+  return `<div data-omnighost-provenance="v1" data-omnighost-mode="${visibility}" data-omnighost-delimiter="${presentation.delimiter}" data-omnighost-size="${presentation.fontSize}" data-omnighost-italic="${presentation.italic}">${delimiter}<p style="${paragraphStyle}">${text}</p></div>`;
+}
+function normalizePublicationProvenancePresentation(presentation) {
+  const delimiter = presentation == null ? void 0 : presentation.delimiter;
+  const fontSize = presentation == null ? void 0 : presentation.fontSize;
   return {
-    type: "paragraph",
-    version: 1,
-    children,
-    direction: "ltr",
-    format: "",
-    indent: 0
+    delimiter: delimiter === "none" || delimiter === "single" || delimiter === "double" ? delimiter : DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION.delimiter,
+    fontSize: fontSize === "normal" || fontSize === "small" || fontSize === "tiny" ? fontSize : DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION.fontSize,
+    italic: (presentation == null ? void 0 : presentation.italic) === true
   };
 }
-function createTextNode(text) {
+function resolvePublicationProvenanceVisibility(override, globalVisibility, isDraft) {
+  if (isDraft)
+    return "hidden";
+  return override === "default" ? globalVisibility : override;
+}
+function resolvePublicationProvenanceImprint(overrideEnabled, visibilityOverride, globalVisibility, presentationOverride, isDraft) {
   return {
-    type: "extended-text",
-    text,
-    version: 1,
-    format: 0,
-    detail: 0,
-    mode: "normal",
-    style: ""
+    visibility: resolvePublicationProvenanceVisibility(
+      overrideEnabled ? visibilityOverride : "default",
+      globalVisibility,
+      isDraft
+    ),
+    presentation: overrideEnabled ? normalizePublicationProvenancePresentation(presentationOverride) : { ...DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION }
   };
 }
-function createLinkNode(text, url, title) {
-  return {
-    type: "link",
-    url,
-    rel: null,
-    target: null,
-    title,
-    version: 1,
-    children: [createTextNode(text)],
-    direction: "ltr"
-  };
+function publicationProvenanceFontSizeCss(size) {
+  if (size === "normal")
+    return "1em";
+  if (size === "small")
+    return "0.8em";
+  return "0.625em";
 }
 function lexicalDocumentsEqual(left, right) {
   try {
@@ -1015,9 +1111,12 @@ Content-Type: ${upload.mimeType}\r
       if (!initialProvenance) {
         throw new Error("Outbound post is missing valid Omnighost publication provenance");
       }
-      const canonicalOutbound = await preparePublicationProvenance(post, options.visibility, {
-        gitCommit: initialProvenance.gitCommit
-      });
+      const canonicalOutbound = await preparePublicationProvenance(
+        post,
+        options.visibility,
+        { gitCommit: initialProvenance.gitCommit },
+        options.presentation
+      );
       const version = selectPublicationVersion(canonicalOutbound.provenance, currentPost.codeinjection_head, {
         allowedExistingGitCommit: options.allowedExistingGitCommit,
         currentVisible: extractTrailingVisiblePublicationProvenance(currentPost.lexical)
@@ -1031,6 +1130,7 @@ Content-Type: ${upload.mimeType}\r
           current: currentPost,
           currentCodeInjectionHead: currentPost.codeinjection_head,
           visibility: options.visibility,
+          presentation: options.presentation,
           gitCommit: version.gitCommit
         });
         requestedPost = {
@@ -1041,7 +1141,12 @@ Content-Type: ${upload.mimeType}\r
         unchanged = comparison.unchanged && this.postMatchesUpdate(currentPost, requestedPost);
         embeddedDigestIsStale = comparison.embeddedDigestIsStale;
       } else {
-        const desired = await preparePublicationProvenance(post, options.visibility, version);
+        const desired = await preparePublicationProvenance(
+          post,
+          options.visibility,
+          version,
+          options.presentation
+        );
         requestedPost = {
           ...post,
           lexical: desired.lexical,
@@ -1103,14 +1208,19 @@ function generateGhostFrontmatter(settings) {
   const prefix = settings.yamlPrefix;
   return `---
 ${prefix}post_access: public
-${prefix}published: false
+${prefix}published: true
 ${prefix}published_at: ""
 ${prefix}featured: false
 ${prefix}tags: []
 ${prefix}excerpt: ""
 ${prefix}feature_image: ""
-${prefix}cover_from_first_image: false
+${prefix}cover_from_first_image: true
 ${prefix}no_sync: false
+${prefix}provenance_override: false
+${prefix}provenance_visibility: default
+${prefix}provenance_delimiter: double
+${prefix}provenance_size: tiny
+${prefix}provenance_italic: false
 ---
 
 `;
@@ -1129,7 +1239,7 @@ Write your members-only content here...
 }
 function findGhostPropertyPrefixes(content) {
   const prefixes = /* @__PURE__ */ new Set();
-  const ghostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync", "id", "slug"];
+  const ghostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync", "provenance_override", "provenance_visibility", "provenance_delimiter", "provenance_size", "provenance_italic", "id", "slug"];
   const lines = content.split("\n");
   for (const line of lines) {
     for (const key of ghostKeys) {
@@ -1153,7 +1263,7 @@ function extractFrontmatter(content) {
   return null;
 }
 function removeOldGhostProperties(frontmatter, currentPrefix) {
-  const ghostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync", "id", "slug"];
+  const ghostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync", "provenance_override", "provenance_visibility", "provenance_delimiter", "provenance_size", "provenance_italic", "id", "slug"];
   const lines = frontmatter.split("\n");
   const filteredLines = [];
   for (const line of lines) {
@@ -1176,7 +1286,7 @@ function removeOldGhostProperties(frontmatter, currentPrefix) {
   return filteredLines.join("\n");
 }
 function getMissingGhostProperties(frontmatter, prefix) {
-  const allGhostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync"];
+  const allGhostKeys = ["post_access", "published", "published_at", "featured", "tags", "excerpt", "feature_image", "cover_from_first_image", "no_sync", "provenance_override", "provenance_visibility", "provenance_delimiter", "provenance_size", "provenance_italic"];
   const lines = frontmatter.split("\n");
   const existingKeys = /* @__PURE__ */ new Set();
   for (const line of lines) {
@@ -1205,14 +1315,19 @@ function addGhostPropertiesToContent(content, settings) {
     const propsToAdd = [];
     const defaults = {
       "post_access": "public",
-      "published": "false",
+      "published": "true",
       "published_at": '""',
       "featured": "false",
       "tags": "[]",
       "excerpt": '""',
       "feature_image": '""',
-      "cover_from_first_image": "false",
-      "no_sync": "false"
+      "cover_from_first_image": "true",
+      "no_sync": "false",
+      "provenance_override": "false",
+      "provenance_visibility": "default",
+      "provenance_delimiter": "double",
+      "provenance_size": "tiny",
+      "provenance_italic": "false"
     };
     for (const key of missingProps) {
       propsToAdd.push(`${prefix}${key}: ${defaults[key]}`);
@@ -1224,14 +1339,19 @@ ${propsToAdd.join("\n")}
 ${parsed.body}`;
   } else {
     const ghostProperties = `${prefix}post_access: public
-${prefix}published: false
+${prefix}published: true
 ${prefix}published_at: ""
 ${prefix}featured: false
 ${prefix}tags: []
 ${prefix}excerpt: ""
 ${prefix}feature_image: ""
-${prefix}cover_from_first_image: false
-${prefix}no_sync: false`;
+${prefix}cover_from_first_image: true
+${prefix}no_sync: false
+${prefix}provenance_override: false
+${prefix}provenance_visibility: default
+${prefix}provenance_delimiter: double
+${prefix}provenance_size: tiny
+${prefix}provenance_italic: false`;
     return `---
 ${ghostProperties}
 ---
@@ -1348,17 +1468,19 @@ function parseGhostMetadata(frontmatter, prefix) {
   if (Array.isArray(rawTags)) {
     tags = rawTags.filter((t) => typeof t === "string");
   }
-  const parseBool = (value) => {
+  const parseBool = (value, fallback = false) => {
     if (typeof value === "boolean")
       return value;
     if (typeof value === "string")
       return value.toLowerCase() === "true";
+    if (value === null || value === void 0)
+      return fallback;
     return Boolean(value);
   };
   const featured = parseBool(get("featured"));
-  const published = parseBool(get("published"));
+  const published = parseBool(get("published"), true);
   const no_sync = parseBool(get("no_sync"));
-  const cover_from_first_image = parseBool(get("cover_from_first_image"));
+  const cover_from_first_image = parseBool(get("cover_from_first_image"), true);
   console.debug("[Ghost Parse] Featured value:", get("featured"), "=> parsed:", featured);
   console.debug("[Ghost Parse] Published value:", get("published"), "=> parsed:", published);
   const toSafeString = (value) => {
@@ -1371,6 +1493,16 @@ function parseGhostMetadata(frontmatter, prefix) {
   console.debug("[Ghost Parse] Excerpt raw value:", get("excerpt"));
   const excerpt = toSafeString(get("excerpt"));
   const feature_image = toSafeString(get("feature_image"));
+  const rawProvenanceOverride = get("provenance_override");
+  const provenance_override = rawProvenanceOverride === true || typeof rawProvenanceOverride === "string" && rawProvenanceOverride.trim().toLowerCase() === "true";
+  const rawProvenanceVisibility = toSafeString(get("provenance_visibility")).toLowerCase();
+  const provenance_visibility = rawProvenanceVisibility === "visible-hash" || rawProvenanceVisibility === "visible-credit" || rawProvenanceVisibility === "hidden" ? rawProvenanceVisibility : "default";
+  const rawProvenanceDelimiter = toSafeString(get("provenance_delimiter")).toLowerCase();
+  const provenance_delimiter = rawProvenanceDelimiter === "none" || rawProvenanceDelimiter === "single" ? rawProvenanceDelimiter : "double";
+  const rawProvenanceSize = toSafeString(get("provenance_size")).toLowerCase();
+  const provenance_size = rawProvenanceSize === "normal" || rawProvenanceSize === "small" ? rawProvenanceSize : "tiny";
+  const rawProvenanceItalic = get("provenance_italic");
+  const provenance_italic = rawProvenanceItalic === true || typeof rawProvenanceItalic === "string" && rawProvenanceItalic.trim().toLowerCase() === "true";
   console.debug("[Ghost Parse] Excerpt parsed:", excerpt, "(length:", excerpt.length, ")");
   const publishedAtStr = toSafeString(get("published_at"));
   const published_at = publishedAtStr !== "" ? publishedAtStr : void 0;
@@ -1384,6 +1516,11 @@ function parseGhostMetadata(frontmatter, prefix) {
     feature_image,
     no_sync,
     cover_from_first_image,
+    provenance_override,
+    provenance_visibility,
+    provenance_delimiter,
+    provenance_size,
+    provenance_italic,
     ghost_id: get("id") ? String(get("id")) : void 0,
     slug: get("slug") ? String(get("slug")) : void 0,
     ghost_url: get("url") ? String(get("url")) : void 0,
@@ -2331,10 +2468,22 @@ ${bodyMarkdown}`;
       if (publishedAt) {
         postData.published_at = publishedAt;
       }
+      const provenanceImprint = resolvePublicationProvenanceImprint(
+        metadata.provenance_override,
+        metadata.provenance_visibility,
+        this.settings.publicationProvenanceVisibility,
+        {
+          delimiter: metadata.provenance_delimiter,
+          fontSize: metadata.provenance_size,
+          italic: metadata.provenance_italic
+        },
+        status === "draft"
+      );
       const preparedProvenance = await preparePublicationProvenance(
         postData,
-        status === "draft" ? "hidden" : this.settings.publicationProvenanceVisibility,
-        (noteVersion == null ? void 0 : noteVersion.kind) === "git" ? { gitCommit: noteVersion.commit } : {}
+        provenanceImprint.visibility,
+        (noteVersion == null ? void 0 : noteVersion.kind) === "git" ? { gitCommit: noteVersion.commit } : {},
+        provenanceImprint.presentation
       );
       postData.lexical = preparedProvenance.lexical;
       postData.codeinjection_head = preparedProvenance.hiddenBlock;
@@ -2363,7 +2512,8 @@ ${bodyMarkdown}`;
       if (targetId) {
         console.debug(`[Ghost Sync] Updating post ${targetId}`);
         const updateResult = await this.ghostClient.updatePost(targetId, postData, {
-          visibility: status === "draft" ? "hidden" : this.settings.publicationProvenanceVisibility,
+          visibility: provenanceImprint.visibility,
+          presentation: provenanceImprint.presentation,
           verifyRemoteContent: this.settings.verifyGhostContentOnSync,
           allowedExistingGitCommit: (noteVersion == null ? void 0 : noteVersion.kind) === "git" ? noteVersion.previousNoteCommit : void 0
         });
@@ -3143,6 +3293,16 @@ var EditGhostPropertiesModal = class extends import_obsidian8.Modal {
     new import_obsidian8.Setting(contentEl).setName("Tags").setDesc("Comma-separated").addText((t) => t.setValue(this.form.tags).onChange((v) => this.form.tags = v));
     new import_obsidian8.Setting(contentEl).setName("Slug").setDesc("Leave empty to derive from the title").addText((t) => t.setValue(this.form.slug).onChange((v) => this.form.slug = v));
     new import_obsidian8.Setting(contentEl).setName("Feature image").setDesc("URL").addText((t) => t.setValue(this.form.featureImage).onChange((v) => this.form.featureImage = v));
+    new import_obsidian8.Setting(contentEl).setHeading().setName("Publication provenance");
+    new import_obsidian8.Setting(contentEl).setName("Override blog settings authority imprint").setDesc("Use note-specific imprint visibility and presentation").addToggle((t) => t.setValue(this.form.provenanceOverride).onChange((v) => {
+      this.form.provenanceOverride = v;
+      this.updateProvenanceDetailsVisibility();
+    }));
+    this.provenanceDetailsContainer = contentEl.createDiv();
+    new import_obsidian8.Setting(this.provenanceDetailsContainer).setName("Visibility").setDesc("Choose what readers see for this post").addDropdown((d) => d.addOption("default", "Use global setting").addOption("visible-hash", "Visible version and credit").addOption("visible-credit", "Visible credit only").addOption("hidden", "Hidden provenance").setValue(this.form.provenanceVisibility).onChange((v) => this.form.provenanceVisibility = v));
+    new import_obsidian8.Setting(this.provenanceDetailsContainer).setName("Delimiter").setDesc("Horizontal line shown above visible provenance").addDropdown((d) => d.addOption("none", "None").addOption("single", "Single line").addOption("double", "Double line").setValue(this.form.provenanceDelimiter).onChange((v) => this.form.provenanceDelimiter = v));
+    new import_obsidian8.Setting(this.provenanceDetailsContainer).setName("Font size").setDesc("Size of visible provenance text").addDropdown((d) => d.addOption("normal", "Normal").addOption("small", "Small").addOption("tiny", "Tiny").setValue(this.form.provenanceFontSize).onChange((v) => this.form.provenanceFontSize = v));
+    new import_obsidian8.Setting(this.provenanceDetailsContainer).setName("Italic").setDesc("Italicize visible provenance text").addToggle((t) => t.setValue(this.form.provenanceItalic).onChange((v) => this.form.provenanceItalic = v));
     new import_obsidian8.Setting(contentEl).addButton((b) => b.setButtonText("Close").onClick(() => this.close())).addButton((b) => {
       this.saveBtn = b;
       b.setButtonText("Save").onClick(() => void this.submit(false));
@@ -3151,6 +3311,7 @@ var EditGhostPropertiesModal = class extends import_obsidian8.Modal {
       b.setButtonText("Save & sync").setCta().onClick(() => void this.submit(true));
     });
     this.updateDateVisibility();
+    this.updateProvenanceDetailsVisibility();
   }
   /** Render (or re-render) the status indicator and public URL row. */
   renderStatus() {
@@ -3211,6 +3372,11 @@ var EditGhostPropertiesModal = class extends import_obsidian8.Modal {
   updateDateVisibility() {
     var _a;
     (_a = this.dateSetting) == null ? void 0 : _a.settingEl.toggleClass("omnighost-hidden", this.form.status !== "schedule");
+  }
+  /** Show note-specific provenance choices only while their override is enabled. */
+  updateProvenanceDetailsVisibility() {
+    var _a;
+    (_a = this.provenanceDetailsContainer) == null ? void 0 : _a.toggleClass("omnighost-hidden", !this.form.provenanceOverride);
   }
   async submit(doSync) {
     var _a, _b;
@@ -3513,7 +3679,12 @@ function isOperationalFrontmatterKey(key, prefix) {
     "url",
     "public_url",
     "ids",
-    "public_urls"
+    "public_urls",
+    "provenance_override",
+    "provenance_visibility",
+    "provenance_delimiter",
+    "provenance_size",
+    "provenance_italic"
   ].includes(suffix))
     return true;
   return suffix.startsWith("id_") || suffix.startsWith("url_") || suffix.startsWith("public_url_");
@@ -5840,7 +6011,7 @@ ${body}`;
    * non-Ghost frontmatter), optionally syncing.
    */
   async openEditPropertiesModal(file) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p;
     const prefix = this.settings.yamlPrefix;
     const content = await this.app.vault.read(file);
     let fmObj = (_b = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
@@ -5854,20 +6025,25 @@ ${body}`;
       }
     }
     const md = parseGhostMetadata(fmObj, prefix);
-    const status = !(md == null ? void 0 : md.published) ? "draft" : md.published_at ? "schedule" : "publish";
+    const status = md ? !md.published ? "draft" : md.published_at ? "schedule" : "publish" : "publish";
     const initial = {
       status,
       visibility: (_c = md == null ? void 0 : md.post_access) != null ? _c : "public",
       featured: (_d = md == null ? void 0 : md.featured) != null ? _d : false,
-      coverFromFirstImage: (_e = md == null ? void 0 : md.cover_from_first_image) != null ? _e : false,
+      coverFromFirstImage: (_e = md == null ? void 0 : md.cover_from_first_image) != null ? _e : true,
       publishedAt: (_f = md == null ? void 0 : md.published_at) != null ? _f : "",
       excerpt: (_g = md == null ? void 0 : md.excerpt) != null ? _g : "",
       tags: ((_h = md == null ? void 0 : md.tags) != null ? _h : []).join(", "),
       slug: (_i = md == null ? void 0 : md.slug) != null ? _i : "",
       featureImage: (_j = md == null ? void 0 : md.feature_image) != null ? _j : "",
+      provenanceOverride: (_k = md == null ? void 0 : md.provenance_override) != null ? _k : false,
+      provenanceVisibility: (_l = md == null ? void 0 : md.provenance_visibility) != null ? _l : "default",
+      provenanceDelimiter: (_m = md == null ? void 0 : md.provenance_delimiter) != null ? _m : "double",
+      provenanceFontSize: (_n = md == null ? void 0 : md.provenance_size) != null ? _n : "tiny",
+      provenanceItalic: (_o = md == null ? void 0 : md.provenance_italic) != null ? _o : false,
       blogIds: this.resolveBlogsForFile(file).map((b) => b.id)
     };
-    const initialPublicUrl = (_k = md == null ? void 0 : md.public_url) != null ? _k : "";
+    const initialPublicUrl = (_p = md == null ? void 0 : md.public_url) != null ? _p : "";
     const info = { savedStatus: initialPublicUrl ? status : "draft", publicUrl: initialPublicUrl, blogStatuses: this.buildBlogStatuses(file, fmObj) };
     const availableBlogs = this.settings.blogs.map((b) => ({ id: b.id, name: b.name }));
     new EditGhostPropertiesModal(this.app, file.basename, initial, info, availableBlogs, async (form, doSync) => {
@@ -5883,7 +6059,12 @@ ${body}`;
         excerpt: yamlString(form.excerpt, true),
         feature_image: yamlString(form.featureImage, true),
         slug: yamlString(form.slug, true),
-        tags: tagsYaml
+        tags: tagsYaml,
+        provenance_override: form.provenanceOverride ? "true" : "false",
+        provenance_visibility: form.provenanceVisibility,
+        provenance_delimiter: form.provenanceDelimiter,
+        provenance_size: form.provenanceFontSize,
+        provenance_italic: form.provenanceItalic ? "true" : "false"
       };
       const selectedBlogs = form.blogIds.map((id) => this.settings.blogs.find((b) => b.id === id)).filter((b) => !!b);
       if (selectedBlogs.length > 0) {

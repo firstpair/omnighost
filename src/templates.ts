@@ -8,14 +8,19 @@ export function generateGhostFrontmatter(settings: GhostWriterSettings): string 
 
 	return `---
 ${prefix}post_access: public
-${prefix}published: false
+${prefix}published: true
 ${prefix}published_at: ""
 ${prefix}featured: false
 ${prefix}tags: []
 ${prefix}excerpt: ""
 ${prefix}feature_image: ""
-${prefix}cover_from_first_image: false
+${prefix}cover_from_first_image: true
 ${prefix}no_sync: false
+${prefix}provenance_override: false
+${prefix}provenance_visibility: default
+${prefix}provenance_delimiter: double
+${prefix}provenance_size: tiny
+${prefix}provenance_italic: false
 ---
 
 `;
@@ -44,7 +49,7 @@ Write your members-only content here...
 export function hasGhostProperties(content: string, prefix: string): boolean {
 	// Escape special regex characters in prefix
 	const escapedPrefix = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	const ghostPropertyPattern = new RegExp(`^${escapedPrefix}(post_access|published|published_at|featured|tags|excerpt|feature_image|cover_from_first_image|no_sync|id|slug):`, 'm');
+	const ghostPropertyPattern = new RegExp(`^${escapedPrefix}(post_access|published|published_at|featured|tags|excerpt|feature_image|cover_from_first_image|no_sync|provenance_override|provenance_visibility|provenance_delimiter|provenance_size|provenance_italic|id|slug):`, 'm');
 	return ghostPropertyPattern.test(content);
 }
 
@@ -54,7 +59,7 @@ export function hasGhostProperties(content: string, prefix: string): boolean {
  */
 export function findGhostPropertyPrefixes(content: string): string[] {
 	const prefixes = new Set<string>();
-	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'id', 'slug'];
+	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'provenance_override', 'provenance_visibility', 'provenance_delimiter', 'provenance_size', 'provenance_italic', 'id', 'slug'];
 	const lines = content.split('\n');
 
 	for (const line of lines) {
@@ -91,7 +96,7 @@ export function extractFrontmatter(content: string): { frontmatter: string; body
  * Remove Ghost properties with old prefixes from frontmatter
  */
 export function removeOldGhostProperties(frontmatter: string, currentPrefix: string): string {
-	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'id', 'slug'];
+	const ghostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'provenance_override', 'provenance_visibility', 'provenance_delimiter', 'provenance_size', 'provenance_italic', 'id', 'slug'];
 	const lines = frontmatter.split('\n');
 	const filteredLines: string[] = [];
 
@@ -125,7 +130,7 @@ export function removeOldGhostProperties(frontmatter: string, currentPrefix: str
  * Get list of missing Ghost properties
  */
 function getMissingGhostProperties(frontmatter: string, prefix: string): string[] {
-	const allGhostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync'];
+	const allGhostKeys = ['post_access', 'published', 'published_at', 'featured', 'tags', 'excerpt', 'feature_image', 'cover_from_first_image', 'no_sync', 'provenance_override', 'provenance_visibility', 'provenance_delimiter', 'provenance_size', 'provenance_italic'];
 	const lines = frontmatter.split('\n');
 	const existingKeys = new Set<string>();
 
@@ -173,14 +178,19 @@ export function addGhostPropertiesToContent(content: string, settings: GhostWrit
 		const propsToAdd: string[] = [];
 		const defaults: Record<string, string> = {
 			'post_access': 'public',
-			'published': 'false',
+			'published': 'true',
 			'published_at': '""',
 			'featured': 'false',
 			'tags': '[]',
 			'excerpt': '""',
 			'feature_image': '""',
-			'cover_from_first_image': 'false',
-			'no_sync': 'false'
+			'cover_from_first_image': 'true',
+			'no_sync': 'false',
+			'provenance_override': 'false',
+			'provenance_visibility': 'default',
+			'provenance_delimiter': 'double',
+			'provenance_size': 'tiny',
+			'provenance_italic': 'false'
 		};
 
 		for (const key of missingProps) {
@@ -196,14 +206,19 @@ ${parsed.body}`;
 	} else {
 		// Create new frontmatter with all properties
 		const ghostProperties = `${prefix}post_access: public
-${prefix}published: false
+${prefix}published: true
 ${prefix}published_at: ""
 ${prefix}featured: false
 ${prefix}tags: []
 ${prefix}excerpt: ""
 ${prefix}feature_image: ""
-${prefix}cover_from_first_image: false
-${prefix}no_sync: false`;
+${prefix}cover_from_first_image: true
+${prefix}no_sync: false
+${prefix}provenance_override: false
+${prefix}provenance_visibility: default
+${prefix}provenance_delimiter: double
+${prefix}provenance_size: tiny
+${prefix}provenance_italic: false`;
 
 		return `---
 ${ghostProperties}

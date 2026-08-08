@@ -1,4 +1,9 @@
 import { App, ButtonComponent, Modal, Notice, Setting, setIcon } from 'obsidian';
+import type {
+	PublicationProvenanceDelimiter,
+	PublicationProvenanceFontSize,
+	PublicationProvenanceVisibilityOverride
+} from '../types';
 
 /** Read-only context shown at the top of the modal (not editable). */
 export interface GhostPropsInfo {
@@ -19,6 +24,11 @@ export interface GhostPropsForm {
 	tags: string; // comma-separated
 	slug: string;
 	featureImage: string;
+	provenanceOverride: boolean;
+	provenanceVisibility: PublicationProvenanceVisibilityOverride;
+	provenanceDelimiter: PublicationProvenanceDelimiter;
+	provenanceFontSize: PublicationProvenanceFontSize;
+	provenanceItalic: boolean;
 }
 
 /**
@@ -34,6 +44,7 @@ export class EditGhostPropertiesModal extends Modal {
 	private availableBlogs: { id: string; name: string }[];
 	private onSubmit: (form: GhostPropsForm, doSync: boolean) => Promise<GhostPropsInfo | void>;
 	private dateSetting?: Setting;
+	private provenanceDetailsContainer?: HTMLElement;
 	private statusContainer?: HTMLElement;
 	private saveBtn?: ButtonComponent;
 	private syncBtn?: ButtonComponent;
@@ -142,12 +153,65 @@ export class EditGhostPropertiesModal extends Modal {
 			.setDesc('URL')
 			.addText(t => t.setValue(this.form.featureImage).onChange(v => this.form.featureImage = v));
 
+		new Setting(contentEl).setHeading().setName('Publication provenance');
+
+		new Setting(contentEl)
+			.setName('Override blog settings authority imprint')
+			.setDesc('Use note-specific imprint visibility and presentation')
+			.addToggle(t => t
+				.setValue(this.form.provenanceOverride)
+				.onChange(v => {
+					this.form.provenanceOverride = v;
+					this.updateProvenanceDetailsVisibility();
+				}));
+
+		this.provenanceDetailsContainer = contentEl.createDiv();
+
+		new Setting(this.provenanceDetailsContainer)
+			.setName('Visibility')
+			.setDesc('Choose what readers see for this post')
+			.addDropdown(d => d
+				.addOption('default', 'Use global setting')
+				.addOption('visible-hash', 'Visible version and credit')
+				.addOption('visible-credit', 'Visible credit only')
+				.addOption('hidden', 'Hidden provenance')
+				.setValue(this.form.provenanceVisibility)
+				.onChange(v => this.form.provenanceVisibility = v as PublicationProvenanceVisibilityOverride));
+
+		new Setting(this.provenanceDetailsContainer)
+			.setName('Delimiter')
+			.setDesc('Horizontal line shown above visible provenance')
+			.addDropdown(d => d
+				.addOption('none', 'None')
+				.addOption('single', 'Single line')
+				.addOption('double', 'Double line')
+				.setValue(this.form.provenanceDelimiter)
+				.onChange(v => this.form.provenanceDelimiter = v as PublicationProvenanceDelimiter));
+
+		new Setting(this.provenanceDetailsContainer)
+			.setName('Font size')
+			.setDesc('Size of visible provenance text')
+			.addDropdown(d => d
+				.addOption('normal', 'Normal')
+				.addOption('small', 'Small')
+				.addOption('tiny', 'Tiny')
+				.setValue(this.form.provenanceFontSize)
+				.onChange(v => this.form.provenanceFontSize = v as PublicationProvenanceFontSize));
+
+		new Setting(this.provenanceDetailsContainer)
+			.setName('Italic')
+			.setDesc('Italicize visible provenance text')
+			.addToggle(t => t
+				.setValue(this.form.provenanceItalic)
+				.onChange(v => this.form.provenanceItalic = v));
+
 		new Setting(contentEl)
 			.addButton(b => b.setButtonText('Close').onClick(() => this.close()))
 			.addButton(b => { this.saveBtn = b; b.setButtonText('Save').onClick(() => void this.submit(false)); })
 			.addButton(b => { this.syncBtn = b; b.setButtonText('Save & sync').setCta().onClick(() => void this.submit(true)); });
 
 		this.updateDateVisibility();
+		this.updateProvenanceDetailsVisibility();
 	}
 
 	/** Render (or re-render) the status indicator and public URL row. */
@@ -212,6 +276,11 @@ export class EditGhostPropertiesModal extends Modal {
 	/** Show the publish-date row only when scheduling. */
 	private updateDateVisibility(): void {
 		this.dateSetting?.settingEl.toggleClass('omnighost-hidden', this.form.status !== 'schedule');
+	}
+
+	/** Show note-specific provenance choices only while their override is enabled. */
+	private updateProvenanceDetailsVisibility(): void {
+		this.provenanceDetailsContainer?.toggleClass('omnighost-hidden', !this.form.provenanceOverride);
 	}
 
 	private async submit(doSync: boolean): Promise<void> {

@@ -1,5 +1,10 @@
 import { App, requestUrl, RequestUrlResponse } from 'obsidian';
-import { GhostAuthMode, GhostPost, GhostPostWrite } from '../types';
+import type {
+	GhostAuthMode,
+	GhostPost,
+	GhostPostWrite,
+	PublicationProvenancePresentation
+} from '../types';
 import { normalizeGhostSiteUrl } from './url';
 import {
 	compareManagedPublicationState,
@@ -26,6 +31,7 @@ export interface GhostPostUpdateResult {
 
 export interface GhostPostUpdateOptions {
 	visibility: PublicationProvenanceVisibility;
+	presentation?: PublicationProvenancePresentation;
 	verifyRemoteContent: boolean;
 	allowedExistingGitCommit?: string;
 }
@@ -561,9 +567,12 @@ export class GhostAPIClient {
 			}
 			// Recompute the outbound digest before it participates in Git-version
 			// selection; the caller's embedded block is transport, not authority.
-			const canonicalOutbound = await preparePublicationProvenance(post, options.visibility, {
-				gitCommit: initialProvenance.gitCommit
-			});
+			const canonicalOutbound = await preparePublicationProvenance(
+				post,
+				options.visibility,
+				{ gitCommit: initialProvenance.gitCommit },
+				options.presentation
+			);
 			const version = selectPublicationVersion(canonicalOutbound.provenance, currentPost.codeinjection_head, {
 				allowedExistingGitCommit: options.allowedExistingGitCommit,
 				currentVisible: extractTrailingVisiblePublicationProvenance(currentPost.lexical)
@@ -578,6 +587,7 @@ export class GhostAPIClient {
 					current: currentPost,
 					currentCodeInjectionHead: currentPost.codeinjection_head,
 					visibility: options.visibility,
+					presentation: options.presentation,
 					gitCommit: version.gitCommit
 				});
 				requestedPost = {
@@ -588,7 +598,12 @@ export class GhostAPIClient {
 				unchanged = comparison.unchanged && this.postMatchesUpdate(currentPost, requestedPost);
 				embeddedDigestIsStale = comparison.embeddedDigestIsStale;
 			} else {
-				const desired = await preparePublicationProvenance(post, options.visibility, version);
+				const desired = await preparePublicationProvenance(
+					post,
+					options.visibility,
+					version,
+					options.presentation
+				);
 				requestedPost = {
 					...post,
 					lexical: desired.lexical,

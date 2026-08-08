@@ -14,6 +14,8 @@ import {
 	mergeHiddenPublicationProvenance,
 	preparePublicationProvenance,
 	publicationLexicalDocumentsEqual,
+	resolvePublicationProvenanceImprint,
+	resolvePublicationProvenanceVisibility,
 	selectPublicationVersion,
 	stableJsonStringify,
 	storedPublicationProvenanceMatches,
@@ -21,6 +23,7 @@ import {
 	stripTrailingPublicationProvenance,
 	type ManagedPublicationInput
 } from './publication-provenance';
+import type { PublicationProvenancePresentation } from '../types';
 
 const BASE_LEXICAL = JSON.stringify({
 	root: {
@@ -104,7 +107,7 @@ void test('stable JSON and publication hashes ignore object key ordering', async
 	);
 });
 
-void test('all visibility modes replace or remove one trailing provenance paragraph', async () => {
+void test('all visibility modes replace or remove one trailing provenance card', async () => {
 	const prepared = await preparePublicationProvenance(
 		publication(),
 		'visible-hash',
@@ -113,6 +116,7 @@ void test('all visibility modes replace or remove one trailing provenance paragr
 	const visibleHash = extractTrailingVisiblePublicationProvenance(prepared.lexical);
 	assert.deepEqual(visibleHash, {
 		mode: 'visible-hash',
+		presentation: { delimiter: 'double', fontSize: 'tiny', italic: false },
 		publicationSha256: prepared.publicationSha256,
 		gitCommitDisplay: GIT_COMMIT.slice(0, 12)
 	});
@@ -124,7 +128,8 @@ void test('all visibility modes replace or remove one trailing provenance paragr
 		prepared.provenance
 	);
 	assert.deepEqual(extractTrailingVisiblePublicationProvenance(creditLexical), {
-		mode: 'visible-credit'
+		mode: 'visible-credit',
+		presentation: { delimiter: 'double', fontSize: 'tiny', italic: false }
 	});
 
 	const hiddenLexical = applyVisiblePublicationProvenance(
@@ -136,67 +141,125 @@ void test('all visibility modes replace or remove one trailing provenance paragr
 	assert.equal(canonicalManagedPublicationJson(publication({ lexical: hiddenLexical })), canonicalManagedPublicationJson(publication()));
 });
 
-void test('strict legacy visible shape can be stripped after an HTML round trip loses the link title', () => {
-	const provenance = createPublicationProvenance('a'.repeat(64));
-	const visible = applyVisiblePublicationProvenance(BASE_LEXICAL, 'visible-credit', provenance);
-	const parsed = JSON.parse(visible) as { root: { children: Array<{ children?: Array<{ title?: string | null }> }> } };
-	const last = parsed.root.children[parsed.root.children.length - 1];
-	const link = last.children?.find((child) => 'title' in child);
-	if (link) link.title = null;
+void test('delimiter, font size, and italic choices render canonically and do not affect the content hash', async () => {
+	const delimiters = ['none', 'single', 'double'] as const;
+	const fontSizes = ['normal', 'small', 'tiny'] as const;
+	const baseHash = await hashManagedPublication(publication());
 
-	const stripped = stripTrailingPublicationProvenance(JSON.stringify(parsed));
-	assert.equal(stripped.removed, true);
-	assert.equal(extractTrailingVisiblePublicationProvenance(stripped.lexical), null);
-	assert.equal(publicationLexicalDocumentsEqual(visible, JSON.stringify(parsed)), true);
+	for (const delimiter of delimiters) {
+		for (const fontSize of fontSizes) {
+			for (const italic of [false, true]) {
+				const presentation: PublicationProvenancePresentation = { delimiter, fontSize, italic };
+				const prepared = await preparePublicationProvenance(
+					publication(),
+					'visible-hash',
+					{ gitCommit: GIT_COMMIT },
+					presentation
+				);
+				assert.deepEqual(extractTrailingVisiblePublicationProvenance(prepared.lexical), {
+					mode: 'visible-hash',
+					presentation,
+					publicationSha256: prepared.publicationSha256,
+					gitCommitDisplay: GIT_COMMIT.slice(0, 12)
+				});
+				const parsed = JSON.parse(prepared.lexical) as { root: { children: Array<{ html?: string }> } };
+				const html = parsed.root.children[parsed.root.children.length - 1].html ?? '';
+				assert.equal(html.includes('<hr '), delimiter !== 'none');
+				if (delimiter === 'single') assert.match(html, /border-top:1px solid/);
+				if (delimiter === 'double') assert.match(html, /border-top:3px double/);
+				assert.match(html, new RegExp(`data-omnighost-size="${fontSize}"`));
+				const expectedSize = fontSize === 'normal' ? '1em' : fontSize === 'small' ? '0.8em' : '0.625em';
+				assert.match(html, new RegExp(`font-size:${expectedSize}`));
+				assert.match(html, new RegExp(`font-style:${italic ? 'italic' : 'normal'}`));
+				assert.equal(await hashManagedPublication(publication({ lexical: prepared.lexical })), baseHash);
+
+				const appliedAgain = applyVisiblePublicationProvenance(
+					prepared.lexical,
+					'visible-hash',
+					prepared.provenance,
+					presentation
+				);
+				assert.equal(appliedAgain, prepared.lexical);
+			}
+		}
+	}
 });
 
-void test('a linked or rewritten Git display is not equal to the plain generated Git hash', async () => {
+void test('per-note visibility inherits global mode unless explicit, and drafts stay hidden', () => {
+	assert.equal(resolvePublicationProvenanceVisibility('default', 'visible-credit', false), 'visible-credit');
+	assert.equal(resolvePublicationProvenanceVisibility('default', 'hidden', false), 'hidden');
+	assert.equal(resolvePublicationProvenanceVisibility('visible-hash', 'hidden', false), 'visible-hash');
+	assert.equal(resolvePublicationProvenanceVisibility('visible-credit', 'hidden', false), 'visible-credit');
+	assert.equal(resolvePublicationProvenanceVisibility('hidden', 'visible-hash', false), 'hidden');
+	assert.equal(resolvePublicationProvenanceVisibility('visible-hash', 'visible-hash', true), 'hidden');
+
+	assert.deepEqual(resolvePublicationProvenanceImprint(
+		false,
+		'visible-credit',
+		'visible-hash',
+		{ delimiter: 'none', fontSize: 'normal', italic: true },
+		false
+	), {
+		visibility: 'visible-hash',
+		presentation: { delimiter: 'double', fontSize: 'tiny', italic: false }
+	});
+	assert.deepEqual(resolvePublicationProvenanceImprint(
+		true,
+		'visible-credit',
+		'visible-hash',
+		{ delimiter: 'none', fontSize: 'normal', italic: true },
+		false
+	), {
+		visibility: 'visible-credit',
+		presentation: { delimiter: 'none', fontSize: 'normal', italic: true }
+	});
+});
+
+void test('strict legacy 0.13 paragraph is recognized, stripped, and upgraded', () => {
+	const parsed = JSON.parse(BASE_LEXICAL) as { root: { children: unknown[] } };
+	parsed.root.children.push({
+		type: 'paragraph',
+		version: 1,
+		children: [
+			{ type: 'extended-text', text: 'published with ' },
+			{
+				type: 'link',
+				url: OMNIGHOST_REPOSITORY_URL,
+				title: null,
+				children: [{ type: 'extended-text', text: 'omnighost' }]
+			}
+		],
+		direction: 'ltr',
+		format: '',
+		indent: 0
+	});
+	const legacyLexical = JSON.stringify(parsed);
+	assert.deepEqual(extractTrailingVisiblePublicationProvenance(legacyLexical), {
+		mode: 'visible-credit',
+		presentation: { delimiter: 'none', fontSize: 'normal', italic: false }
+	});
+	const stripped = stripTrailingPublicationProvenance(legacyLexical);
+	assert.equal(stripped.removed, true);
+	assert.equal(extractTrailingVisiblePublicationProvenance(stripped.lexical), null);
+	const upgraded = applyVisiblePublicationProvenance(legacyLexical, 'visible-credit', createPublicationProvenance('a'.repeat(64)));
+	assert.deepEqual(extractTrailingVisiblePublicationProvenance(upgraded), {
+		mode: 'visible-credit',
+		presentation: { delimiter: 'double', fontSize: 'tiny', italic: false }
+	});
+});
+
+void test('manual changes to the owned card are detected instead of trusted', async () => {
 	const prepared = await preparePublicationProvenance(
 		publication(),
 		'visible-hash',
 		{ gitCommit: GIT_COMMIT }
 	);
-	const parsed = JSON.parse(prepared.lexical) as {
-		root: { children: Array<{ children?: Array<Record<string, unknown>> }> };
-	};
+	const parsed = JSON.parse(prepared.lexical) as { root: { children: Array<{ html?: string }> } };
 	const last = parsed.root.children[parsed.root.children.length - 1];
-	const shortCommit = GIT_COMMIT.slice(0, 12);
-	const index = last.children?.findIndex((child) => child.text === shortCommit) ?? -1;
-	assert.notEqual(index, -1);
-	const textNode = last.children?.[index];
-	if (!last.children || !textNode) throw new Error('Expected generated Git text node');
-	last.children[index] = {
-		type: 'link',
-		url: SOURCE_URL,
-		rel: null,
-		target: null,
-		title: null,
-		version: 1,
-		children: [textNode],
-		direction: 'ltr'
-	};
-
+	if (!last.html) throw new Error('Expected generated provenance HTML card');
+	last.html = last.html.replace('font-size:0.625em', 'font-size:2em');
+	assert.equal(extractTrailingVisiblePublicationProvenance(JSON.stringify(parsed)), null);
 	assert.equal(publicationLexicalDocumentsEqual(prepared.lexical, JSON.stringify(parsed)), false);
-
-	const wrapped = JSON.parse(prepared.lexical) as {
-		root: { children: Array<{ children?: Array<Record<string, unknown>> }> };
-	};
-	const wrappedChildren = wrapped.root.children[wrapped.root.children.length - 1].children;
-	if (!wrappedChildren) throw new Error('Expected generated provenance children');
-	const gitPrefixIndex = wrappedChildren.findIndex((child) => child.text === ' · Git ');
-	assert.notEqual(gitPrefixIndex, -1);
-	const wrappedNodes = wrappedChildren.splice(gitPrefixIndex, 2, {
-		type: 'link',
-		url: 'javascript:alert(1)',
-		rel: null,
-		target: null,
-		title: null,
-		version: 1,
-		children: wrappedChildren.slice(gitPrefixIndex, gitPrefixIndex + 2),
-		direction: 'ltr'
-	});
-	assert.equal(wrappedNodes.length, 2);
-	assert.equal(publicationLexicalDocumentsEqual(prepared.lexical, JSON.stringify(wrapped)), false);
 });
 
 void test('similar author text without the exact repository link is not stripped', () => {
@@ -209,7 +272,7 @@ void test('similar author text without the exact repository link is not stripped
 	assert.deepEqual(stripTrailingPublicationProvenance(lexical), { lexical, removed: false });
 });
 
-void test('rendered provenance is removed from inbound Ghost HTML only at the end', () => {
+void test('rendered provenance is removed from inbound Ghost HTML only at the end', async () => {
 	const prefix = '<p>Keep this paragraph.</p>';
 	const credit = '<p>published with <a href="https://github.com/firstpair/omnighost">omnighost</a></p>';
 	const version = `<p>published with <a title="omnighost-provenance-v1" href="${OMNIGHOST_REPOSITORY_URL}">omnighost</a> · Git <a href="${SOURCE_URL}">${GIT_COMMIT.slice(0, 12)}</a> · SHA-256 ${'a'.repeat(64)}</p>`;
@@ -217,6 +280,13 @@ void test('rendered provenance is removed from inbound Ghost HTML only at the en
 	assert.equal(stripRenderedPublicationProvenanceHtml(prefix + version), prefix);
 	assert.equal(stripRenderedPublicationProvenanceHtml(credit + prefix), credit + prefix);
 	assert.equal(stripRenderedPublicationProvenanceHtml('<p>published with omnighost</p>'), '<p>published with omnighost</p>');
+
+	const prepared = await preparePublicationProvenance(publication(), 'visible-hash', { gitCommit: GIT_COMMIT });
+	const lexical = JSON.parse(prepared.lexical) as { root: { children: Array<{ html?: string }> } };
+	const card = lexical.root.children[lexical.root.children.length - 1].html;
+	if (!card) throw new Error('Expected rendered provenance card');
+	assert.equal(stripRenderedPublicationProvenanceHtml(`${prefix}<!--kg-card-begin: html-->${card}<!--kg-card-end: html-->`), prefix);
+	assert.equal(stripRenderedPublicationProvenanceHtml(`${card}${prefix}`), `${card}${prefix}`);
 });
 
 void test('hidden metadata round-trips and preserves unrelated code injection bytes', () => {
@@ -337,6 +407,37 @@ void test('stale embedded metadata never hides a Ghost-side content change', asy
 	});
 	assert.equal(unchanged.unchanged, true);
 	assert.equal(unchanged.embeddedDigestMatchesCurrent, true);
+});
+
+void test('presentation drift forces an update while hidden mode ignores presentation', async () => {
+	const desired = publication();
+	const currentPrepared = await preparePublicationProvenance(
+		desired,
+		'visible-hash',
+		{},
+		{ delimiter: 'double', fontSize: 'tiny', italic: false }
+	);
+	const changedPresentation = await compareManagedPublicationState({
+		desired,
+		current: publication({ lexical: currentPrepared.lexical }),
+		currentCodeInjectionHead: currentPrepared.hiddenBlock,
+		visibility: 'visible-hash',
+		presentation: { delimiter: 'single', fontSize: 'small', italic: true }
+	});
+	assert.equal(changedPresentation.contentMatches, true);
+	assert.equal(changedPresentation.visibleProvenanceMatches, false);
+	assert.equal(changedPresentation.unchanged, false);
+
+	const hidden = await preparePublicationProvenance(desired, 'hidden');
+	const hiddenComparison = await compareManagedPublicationState({
+		desired,
+		current: desired,
+		currentCodeInjectionHead: hidden.hiddenBlock,
+		visibility: 'hidden',
+		presentation: { delimiter: 'none', fontSize: 'normal', italic: true }
+	});
+	assert.equal(hiddenComparison.visibleProvenanceMatches, true);
+	assert.equal(hiddenComparison.unchanged, true);
 });
 
 void test('stored-provenance fast path can be disabled to catch a Ghost-side edit', async () => {

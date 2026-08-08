@@ -22,7 +22,11 @@ interface GhostApiClientLike {
 	updatePost(
 		postId: string,
 		post: GhostPostWrite,
-		options: { visibility: 'visible-hash'; verifyRemoteContent: boolean }
+		options: {
+			visibility: 'visible-hash';
+			presentation?: { delimiter: 'none' | 'single' | 'double'; fontSize: 'normal' | 'small' | 'tiny'; italic: boolean };
+			verifyRemoteContent: boolean;
+		}
 	): Promise<{ post: GhostPost; changed: boolean }>;
 }
 
@@ -102,7 +106,7 @@ void test('staff mode reports a staff-token-specific configuration error', async
 	await assert.rejects(() => client.getPosts(), /Staff access token not configured/);
 });
 
-void test('an unchanged inherited Git publication performs no Ghost PUT', async () => {
+void test('an unchanged inherited Git publication skips PUT while presentation drift performs one', async () => {
 	const gitCommit = '0123456789abcdef0123456789abcdef01234567';
 	const base: GhostPostWrite = {
 		title: 'Imported title',
@@ -161,6 +165,15 @@ void test('an unchanged inherited Git publication performs no Ghost PUT', async 
 		});
 		assert.equal(result.changed, false);
 		assert.deepEqual(methods, ['GET']);
+
+		methods.length = 0;
+		const changed = await client.updatePost('post-id', outbound, {
+			visibility: 'visible-hash',
+			presentation: { delimiter: 'single', fontSize: 'small', italic: true },
+			verifyRemoteContent: true
+		});
+		assert.equal(changed.changed, true);
+		assert.deepEqual(methods, ['GET', 'PUT']);
 	} finally {
 		delete runtime.__omnighostApiRequest;
 	}

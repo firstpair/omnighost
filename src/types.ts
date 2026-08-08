@@ -21,6 +21,28 @@ export type TitlePrimarySource = 'metadata' | 'heading';
 
 export type PublicationProvenanceVisibility = 'visible-hash' | 'visible-credit' | 'hidden';
 
+/** Per-note visibility selection; `default` inherits the plugin-wide setting. */
+export type PublicationProvenanceVisibilityOverride = 'default' | PublicationProvenanceVisibility;
+
+/** Reader-visible rule rendered immediately before the provenance line. */
+export type PublicationProvenanceDelimiter = 'none' | 'single' | 'double';
+
+/** Reader-visible provenance text size. */
+export type PublicationProvenanceFontSize = 'normal' | 'small' | 'tiny';
+
+/** Per-note presentation of the reader-visible provenance line. */
+export interface PublicationProvenancePresentation {
+	delimiter: PublicationProvenanceDelimiter;
+	fontSize: PublicationProvenanceFontSize;
+	italic: boolean;
+}
+
+export const DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION: Readonly<PublicationProvenancePresentation> = {
+	delimiter: 'double',
+	fontSize: 'tiny',
+	italic: false
+};
+
 /**
  * Plugin settings interface
  * Note: ghostAdminApiKey is stored securely in Obsidian's Secrets (Keychain)

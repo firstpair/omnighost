@@ -123,11 +123,13 @@ On desktop, publishing a note also commits that note to its nearest Git reposito
 
 Textpacks preserve the earlier source version across the handoff. Before `scripts/textpack.py` writes a pack, it safely commits the source Markdown and every referenced local image, without including unrelated staged changes or pushing. The pack carries that commit plus a portable payload SHA-256. Import verifies the payload, records the source version in the note, and fingerprints the imported authorial metadata, body, and asset bytes. Changing only publish/schedule toggles, blog routing, or Ghost id/URL write-backs keeps the inherited version valid; changing the title, body, slug, tags, excerpt, access, feature settings, or an imported asset invalidates it and returns to normal note versioning. Thus an untouched imported note publishes with the textpack's Git version and its next sync reports `Unchanged`. If Git was unavailable or unsafe while building the pack, import still verifies the payload and publication uses the directly comparable publication SHA-256. This is an integrity check, not a signature: a pack's claimed Git commit is self-attested and should not be treated as proof that it came from a trusted repository.
 
-The **Publication provenance** setting controls the final reader-facing line:
+The global **Publication provenance** setting supplies the default final reader-facing line:
 
 - **Visible version and credit** — `published with omnighost`, the Git version when available, and the publication SHA-256
 - **Visible credit only** — linked `published with omnighost` text; version details remain hidden
 - **Hidden provenance** — no reader-facing line; version details remain in Ghost's per-post code-injection metadata
+
+Each note can override that imprint in **Edit ghost properties → Publication provenance**. Turn on **Override blog settings authority imprint** to reveal the per-post visibility, divider (**None**, **Single line**, or **Double line**), font size (**Normal**, **Small**, or **Tiny**), and italic controls. With the override off, the blog/global visibility and the default double rule with tiny, non-italic text apply. These display-only choices do not invalidate an inherited textpack Git version; changing one updates the Ghost presentation once, after which the next sync reports `Unchanged` again.
 
 The hidden metadata is non-visible, not secret or cryptographically signed: it can still be inspected and edited in Ghost or page source. **Verify published content directly** is enabled by default and retains the managed-field comparison as a safeguard against edits made directly in Ghost without updating the embedded hash. Turning it off trusts the stored provenance for a faster check, so manual Ghost edits can be missed until direct verification is enabled again.
 
@@ -188,15 +190,20 @@ Open it from the ribbon icon or `Cmd/Ctrl + P` → "Open Ghost editorial calenda
 ---
 ghost_blog: ["example.com"]      # Target blog domain(s); omit to use the default blog
 ghost_post_access: paid          # Visibility: public, members, or paid
-ghost_published: false           # Draft (false) or published/scheduled (true)
+ghost_published: true            # Published/scheduled (true) or draft (false)
 ghost_published_at: ""           # Schedule: ISO date (e.g., "2026-12-25T10:00:00.000Z")
 ghost_featured: false            # Mark as featured post
 ghost_tags: [obsidian, ghost]    # Post tags
 ghost_excerpt: "Post summary"    # Custom excerpt/description
 ghost_feature_image: ""          # Cover image URL
-ghost_cover_from_first_image: false
+ghost_cover_from_first_image: true # Use the first body image as the cover by default
 ghost_slug: "custom-url"         # Custom URL slug (also enables update-by-slug adoption)
 ghost_no_sync: false             # Disable sync for this post
+ghost_provenance_override: false # Use blog/global authority imprint unless true
+ghost_provenance_visibility: default # default, visible-hash, visible-credit, or hidden
+ghost_provenance_delimiter: double   # none, single, or double
+ghost_provenance_size: tiny          # normal, small, or tiny
+ghost_provenance_italic: false
 ---
 
 # Your Post Title

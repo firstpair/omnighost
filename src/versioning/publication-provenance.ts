@@ -1,3 +1,15 @@
+import { DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION } from '../types';
+import type {
+	PublicationProvenanceDelimiter,
+	PublicationProvenanceFontSize,
+	PublicationProvenancePresentation,
+	PublicationProvenanceVisibility,
+	PublicationProvenanceVisibilityOverride
+} from '../types';
+
+export { DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION } from '../types';
+export type { PublicationProvenanceVisibility } from '../types';
+
 export const OMNIGHOST_REPOSITORY_URL = 'https://github.com/firstpair/omnighost';
 export const PUBLICATION_PROVENANCE_SCHEMA = 'omnighost-publication-v1';
 export const MANAGED_PUBLICATION_SCHEMA = 'omnighost-managed-publication-v1';
@@ -7,8 +19,6 @@ const HIDDEN_BLOCK_START = '<!-- omnighost-provenance:v1:start -->';
 const HIDDEN_BLOCK_END = '<!-- omnighost-provenance:v1:end -->';
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const GIT_COMMIT_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-
-export type PublicationProvenanceVisibility = 'visible-hash' | 'visible-credit' | 'hidden';
 
 export interface ManagedPublicationInput {
 	title: string;
@@ -47,6 +57,7 @@ export interface StrippedLexicalProvenance {
 
 export interface VisiblePublicationProvenance {
 	mode: Exclude<PublicationProvenanceVisibility, 'hidden'>;
+	presentation: PublicationProvenancePresentation;
 	publicationSha256?: string;
 	gitCommitDisplay?: string;
 }
@@ -56,6 +67,11 @@ export interface PreparedPublicationProvenance {
 	provenance: PublicationProvenance;
 	lexical: string;
 	hiddenBlock: string;
+}
+
+export interface ResolvedPublicationProvenanceImprint {
+	visibility: PublicationProvenanceVisibility;
+	presentation: PublicationProvenancePresentation;
 }
 
 export interface PublicationStateComparison {
@@ -77,6 +93,7 @@ export interface ComparePublicationStateOptions extends PublicationVersion {
 	current: ManagedPublicationInput;
 	currentCodeInjectionHead?: string | null;
 	visibility: PublicationProvenanceVisibility;
+	presentation?: PublicationProvenancePresentation;
 }
 
 type JsonPrimitive = string | number | boolean | null;
@@ -150,7 +167,8 @@ export function createPublicationProvenance(
 }
 
 /**
- * Remove a marked Omnighost paragraph only when it is the final Lexical block.
+ * Remove a marked Omnighost card (or strict legacy paragraph) only when it is
+ * the final Lexical block.
  * The original lexical string is returned byte-for-byte when nothing is removed.
  */
 export function stripTrailingPublicationProvenance(lexical: string): StrippedLexicalProvenance {
@@ -169,7 +187,7 @@ export function extractTrailingVisiblePublicationProvenance(
 	const document = parseLexicalDocument(lexical);
 	const children = lexicalChildren(document);
 	if (children.length === 0) return null;
-	return classifyProvenanceParagraph(children[children.length - 1]);
+	return classifyProvenanceNode(children[children.length - 1]);
 }
 
 /** Compare content and the recognized trailing provenance semantically. */
@@ -181,8 +199,29 @@ export function publicationLexicalDocumentsEqual(left: string, right: string): b
 		=== stableJsonStringify(rightStripped.visible ?? null);
 }
 
-/** Remove Omnighost's rendered final paragraph before Ghost-to-note imports. */
+/** Remove Omnighost's rendered final card or legacy paragraph before imports. */
 export function stripRenderedPublicationProvenanceHtml(html: string): string {
+	const cardMarker = '<div data-omnighost-provenance="v1"';
+	const cardStart = html.toLowerCase().lastIndexOf(cardMarker);
+	if (cardStart !== -1) {
+		const cardEndMarker = '</div>';
+		const cardEnd = html.indexOf(cardEndMarker, cardStart);
+		if (cardEnd !== -1) {
+			const candidateEnd = cardEnd + cardEndMarker.length;
+			const suffix = html.slice(candidateEnd);
+			if (/^(?:\s*<!--kg-card-end:\s*html-->)?\s*$/i.test(suffix)) {
+				const candidate = html.slice(cardStart, candidateEnd);
+				if (classifyProvenanceHtml(candidate)) {
+					const before = html.slice(0, cardStart);
+					const wrapper = /<!--kg-card-begin:\s*html-->\s*$/i.exec(before);
+					return html.slice(0, wrapper?.index ?? cardStart);
+				}
+			}
+		}
+	}
+
+	// Omnighost 0.13 and earlier used a native final paragraph. Keep recognizing
+	// that strict legacy shape so Ghost-to-note imports do not pull it into notes.
 	const paragraphStart = html.toLowerCase().lastIndexOf('<p');
 	if (paragraphStart === -1) return html;
 	const match = /^<p(?:\s[^>]*)?>([\s\S]*?)<\/p>\s*$/i.exec(html.slice(paragraphStart));
@@ -205,13 +244,14 @@ export function stripRenderedPublicationProvenanceHtml(html: string): string {
 }
 
 /**
- * Replace the trailing Omnighost paragraph for the selected visibility mode.
- * Hidden mode removes a previous marked paragraph and appends nothing.
+ * Replace the trailing Omnighost card for the selected visibility mode.
+ * Hidden mode removes a previous marked card or legacy paragraph and appends nothing.
  */
 export function applyVisiblePublicationProvenance(
 	lexical: string,
 	visibility: PublicationProvenanceVisibility,
-	provenance: PublicationProvenance
+	provenance: PublicationProvenance,
+	presentation: PublicationProvenancePresentation = DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION
 ): string {
 	const document = parseLexicalDocument(lexical);
 	const removed = stripTrailingProvenanceNode(document) !== null;
@@ -219,7 +259,11 @@ export function applyVisiblePublicationProvenance(
 		return removed ? JSON.stringify(document) : lexical;
 	}
 
-	lexicalChildren(document).push(createVisibleProvenanceParagraph(visibility, provenance));
+	lexicalChildren(document).push(createVisibleProvenanceCard(
+		visibility,
+		provenance,
+		normalizePublicationProvenancePresentation(presentation)
+	));
 	return JSON.stringify(document);
 }
 
@@ -345,14 +389,15 @@ export function storedPublicationProvenanceMatches(
 export async function preparePublicationProvenance(
 	publication: ManagedPublicationInput,
 	visibility: PublicationProvenanceVisibility,
-	version: PublicationVersion = {}
+	version: PublicationVersion = {},
+	presentation: PublicationProvenancePresentation = DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION
 ): Promise<PreparedPublicationProvenance> {
 	const publicationSha256 = await hashManagedPublication(publication);
 	const provenance = createPublicationProvenance(publicationSha256, version);
 	return {
 		publicationSha256,
 		provenance,
-		lexical: applyVisiblePublicationProvenance(publication.lexical, visibility, provenance),
+		lexical: applyVisiblePublicationProvenance(publication.lexical, visibility, provenance, presentation),
 		hiddenBlock: buildHiddenPublicationProvenance(provenance)
 	};
 }
@@ -367,7 +412,8 @@ export async function compareManagedPublicationState(
 	const desired = await preparePublicationProvenance(
 		options.desired,
 		options.visibility,
-		{ gitCommit: options.gitCommit }
+		{ gitCommit: options.gitCommit },
+		options.presentation
 	);
 	const currentSha256 = await hashManagedPublication(options.current);
 	const embedded = extractHiddenPublicationProvenance(options.currentCodeInjectionHead);
@@ -458,20 +504,77 @@ function lexicalChildren(document: UnknownRecord): unknown[] {
 function stripTrailingProvenanceNode(document: UnknownRecord): VisiblePublicationProvenance | null {
 	const children = lexicalChildren(document);
 	if (children.length === 0) return null;
-	const visible = classifyProvenanceParagraph(children[children.length - 1]);
+	const visible = classifyProvenanceNode(children[children.length - 1]);
 	if (!visible) return null;
 	children.pop();
 	return visible;
 }
 
-function classifyProvenanceParagraph(node: unknown): VisiblePublicationProvenance | null {
+function classifyProvenanceNode(node: unknown): VisiblePublicationProvenance | null {
+	if (isRecord(node) && node.type === 'html' && typeof node.html === 'string') {
+		return classifyProvenanceHtml(node.html);
+	}
+	return classifyLegacyProvenanceParagraph(node);
+}
+
+function classifyProvenanceHtml(html: string): VisiblePublicationProvenance | null {
+	const outer = /^<div data-omnighost-provenance="v1" data-omnighost-mode="(visible-hash|visible-credit)" data-omnighost-delimiter="(none|single|double)" data-omnighost-size="(normal|small|tiny)" data-omnighost-italic="(true|false)">([\s\S]*)<\/div>$/.exec(html);
+	if (!outer) return null;
+
+	const mode = outer[1] as Exclude<PublicationProvenanceVisibility, 'hidden'>;
+	const presentation: PublicationProvenancePresentation = {
+		delimiter: outer[2] as PublicationProvenanceDelimiter,
+		fontSize: outer[3] as PublicationProvenanceFontSize,
+		italic: outer[4] === 'true'
+	};
+	const inner = outer[5];
+	const repositoryLink = `<a href="${OMNIGHOST_REPOSITORY_URL}" rel="noopener">omnighost</a>`;
+	if (!inner.includes(repositoryLink)) return null;
+	const text = decodeRenderedHtmlText(inner.replace(/<[^>]*>/g, ''));
+
+	let publicationSha256: string | undefined;
+	let gitCommitDisplay: string | undefined;
+	if (mode === 'visible-credit') {
+		if (text !== 'published with omnighost') return null;
+	} else {
+		const full = text.match(
+			/^published with omnighost(?: · Git ([0-9a-f]{7,64}))? · SHA-256 ([0-9a-f]{64})$/
+		);
+		if (!full) return null;
+		gitCommitDisplay = full[1];
+		publicationSha256 = full[2];
+	}
+
+	// The card's data attributes describe the presentation, but the exact HTML
+	// remains the comparison authority. A manual Ghost edit to inline styles,
+	// the divider, text, or link therefore invalidates the card and forces sync.
+	const expected = createVisibleProvenanceHtml(
+		mode,
+		publicationSha256,
+		gitCommitDisplay,
+		presentation
+	);
+	if (html !== expected) return null;
+
+	return {
+		mode,
+		presentation,
+		...(publicationSha256 ? { publicationSha256 } : {}),
+		...(gitCommitDisplay ? { gitCommitDisplay } : {})
+	};
+}
+
+function classifyLegacyProvenanceParagraph(node: unknown): VisiblePublicationProvenance | null {
 	if (!isRecord(node) || node.type !== 'paragraph' || !Array.isArray(node.children)) return null;
 	const links = collectLinkNodes(node.children);
 	if (links.length !== 1 || !isOmnighostRepositoryLink(links[0])) return null;
 
 	const text = collectLexicalText(node);
 	if (text === 'published with omnighost') {
-		return { mode: 'visible-credit' };
+		return {
+			mode: 'visible-credit',
+			presentation: { delimiter: 'none', fontSize: 'normal', italic: false }
+		};
 	}
 
 	const full = text.match(
@@ -480,6 +583,7 @@ function classifyProvenanceParagraph(node: unknown): VisiblePublicationProvenanc
 	if (!full) return null;
 	return {
 		mode: 'visible-hash',
+		presentation: { delimiter: 'none', fontSize: 'normal', italic: false },
 		publicationSha256: full[2],
 		...(full[1] ? { gitCommitDisplay: full[1] } : {})
 	};
@@ -512,57 +616,98 @@ function collectLexicalText(node: unknown): string {
 	return text;
 }
 
-function createVisibleProvenanceParagraph(
+function createVisibleProvenanceCard(
 	visibility: Exclude<PublicationProvenanceVisibility, 'hidden'>,
-	provenance: PublicationProvenance
+	provenance: PublicationProvenance,
+	presentation: PublicationProvenancePresentation
 ): UnknownRecord {
-	const children: UnknownRecord[] = [
-		createTextNode('published with '),
-		createLinkNode('omnighost', OMNIGHOST_REPOSITORY_URL, PROVENANCE_LINK_TITLE)
-	];
+	return {
+		type: 'html',
+		version: 1,
+		html: createVisibleProvenanceHtml(
+			visibility,
+			visibility === 'visible-hash' ? provenance.publicationSha256 : undefined,
+			visibility === 'visible-hash' && provenance.gitCommit
+				? provenance.gitCommit.slice(0, 12)
+				: undefined,
+			presentation
+		)
+	};
+}
 
+function createVisibleProvenanceHtml(
+	visibility: Exclude<PublicationProvenanceVisibility, 'hidden'>,
+	publicationSha256: string | undefined,
+	gitCommitDisplay: string | undefined,
+	presentation: PublicationProvenancePresentation
+): string {
+	const delimiter = presentation.delimiter === 'none'
+		? ''
+		: `<hr data-omnighost-delimiter="${presentation.delimiter}" style="border:0;border-top:${presentation.delimiter === 'double' ? '3px double' : '1px solid'} currentColor;margin:0 0 0.5em;">`;
+	const size = publicationProvenanceFontSizeCss(presentation.fontSize);
+	const paragraphStyle = `margin:0;font-size:${size};line-height:1.4;overflow-wrap:anywhere;font-style:${presentation.italic ? 'italic' : 'normal'};`;
+	let text = `published with <a href="${OMNIGHOST_REPOSITORY_URL}" rel="noopener">omnighost</a>`;
 	if (visibility === 'visible-hash') {
-		if (provenance.gitCommit) {
-			children.push(createTextNode(' · Git '));
-			const shortCommit = provenance.gitCommit.slice(0, 12);
-			children.push(createTextNode(shortCommit));
+		if (!publicationSha256 || !SHA256_PATTERN.test(publicationSha256)) {
+			throw new Error('Visible publication provenance requires a valid SHA-256 digest');
 		}
-		children.push(createTextNode(` · SHA-256 ${provenance.publicationSha256}`));
+		if (gitCommitDisplay) text += ` · Git ${gitCommitDisplay}`;
+		text += ` · SHA-256 ${publicationSha256}`;
 	}
+	return `<div data-omnighost-provenance="v1" data-omnighost-mode="${visibility}" data-omnighost-delimiter="${presentation.delimiter}" data-omnighost-size="${presentation.fontSize}" data-omnighost-italic="${presentation.italic}">${delimiter}<p style="${paragraphStyle}">${text}</p></div>`;
+}
 
+/** Normalize untrusted presentation values to stable publishing defaults. */
+export function normalizePublicationProvenancePresentation(
+	presentation: Partial<PublicationProvenancePresentation> | null | undefined
+): PublicationProvenancePresentation {
+	const delimiter = presentation?.delimiter;
+	const fontSize = presentation?.fontSize;
 	return {
-		type: 'paragraph',
-		version: 1,
-		children,
-		direction: 'ltr',
-		format: '',
-		indent: 0
+		delimiter: delimiter === 'none' || delimiter === 'single' || delimiter === 'double'
+			? delimiter
+			: DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION.delimiter,
+		fontSize: fontSize === 'normal' || fontSize === 'small' || fontSize === 'tiny'
+			? fontSize
+			: DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION.fontSize,
+		italic: presentation?.italic === true
 	};
 }
 
-function createTextNode(text: string): UnknownRecord {
+/** Resolve a note override once so preparation and comparison use one mode. */
+export function resolvePublicationProvenanceVisibility(
+	override: PublicationProvenanceVisibilityOverride,
+	globalVisibility: PublicationProvenanceVisibility,
+	isDraft: boolean
+): PublicationProvenanceVisibility {
+	if (isDraft) return 'hidden';
+	return override === 'default' ? globalVisibility : override;
+}
+
+/** Resolve the blog imprint defaults or the complete enabled per-note override. */
+export function resolvePublicationProvenanceImprint(
+	overrideEnabled: boolean,
+	visibilityOverride: PublicationProvenanceVisibilityOverride,
+	globalVisibility: PublicationProvenanceVisibility,
+	presentationOverride: Partial<PublicationProvenancePresentation> | null | undefined,
+	isDraft: boolean
+): ResolvedPublicationProvenanceImprint {
 	return {
-		type: 'extended-text',
-		text,
-		version: 1,
-		format: 0,
-		detail: 0,
-		mode: 'normal',
-		style: ''
+		visibility: resolvePublicationProvenanceVisibility(
+			overrideEnabled ? visibilityOverride : 'default',
+			globalVisibility,
+			isDraft
+		),
+		presentation: overrideEnabled
+			? normalizePublicationProvenancePresentation(presentationOverride)
+			: { ...DEFAULT_PUBLICATION_PROVENANCE_PRESENTATION }
 	};
 }
 
-function createLinkNode(text: string, url: string, title: string | null): UnknownRecord {
-	return {
-		type: 'link',
-		url,
-		rel: null,
-		target: null,
-		title,
-		version: 1,
-		children: [createTextNode(text)],
-		direction: 'ltr'
-	};
+function publicationProvenanceFontSizeCss(size: PublicationProvenanceFontSize): string {
+	if (size === 'normal') return '1em';
+	if (size === 'small') return '0.8em';
+	return '0.625em';
 }
 
 function lexicalDocumentsEqual(left: string, right: string): boolean {
