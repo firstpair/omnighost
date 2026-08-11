@@ -1929,7 +1929,35 @@ function createPaywall() {
   };
 }
 function parseInlineFormatting(text) {
-  var _a;
+  const nodes = [];
+  const linkPattern = /\[(.+?)\]\((.+?)\)/g;
+  let linkEnd = 0;
+  let linkMatch;
+  while ((linkMatch = linkPattern.exec(text)) !== null) {
+    if (linkMatch.index > linkEnd) {
+      nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.index)));
+    }
+    nodes.push({
+      type: "link",
+      url: linkMatch[2],
+      rel: null,
+      target: null,
+      title: null,
+      version: 1,
+      children: parseInlineText(linkMatch[1]),
+      direction: "ltr"
+    });
+    linkEnd = linkPattern.lastIndex;
+  }
+  if (linkEnd < text.length) {
+    nodes.push(...parseInlineText(text.slice(linkEnd)));
+  }
+  if (nodes.length === 0) {
+    return parseInlineText(text);
+  }
+  return nodes;
+}
+function parseInlineText(text) {
   const nodes = [];
   let current = text;
   current = current.replace(/\*\*(.+?)\*\*/g, (_, content) => {
@@ -1946,9 +1974,6 @@ function parseInlineFormatting(text) {
   });
   current = current.replace(/`(.+?)`/g, (_, content) => {
     return `{{CODE}}${content}{{/CODE}}`;
-  });
-  current = current.replace(/\[(.+?)\]\((.+?)\)/g, (_, text2, url) => {
-    return `{{LINK:${url}}}${text2}{{/LINK}}`;
   });
   const segments = current.split(/(\{\{[^}]+\}\})/g);
   let i = 0;
@@ -1991,28 +2016,6 @@ function parseInlineFormatting(text) {
         detail: 0,
         mode: "normal",
         style: ""
-      });
-      i += 2;
-    } else if (segment.startsWith("{{LINK:")) {
-      const url = ((_a = segment.match(/\{\{LINK:(.+?)\}\}/)) == null ? void 0 : _a[1]) || "";
-      i++;
-      nodes.push({
-        type: "link",
-        url,
-        rel: null,
-        target: null,
-        title: null,
-        version: 1,
-        children: [{
-          type: "extended-text",
-          text: segments[i],
-          version: 1,
-          format: 0,
-          detail: 0,
-          mode: "normal",
-          style: ""
-        }],
-        direction: "ltr"
       });
       i += 2;
     } else if (segment && !segment.startsWith("{{")) {

@@ -364,6 +364,45 @@ function createPaywall(): LexicalNode {
  */
 function parseInlineFormatting(text: string): LexicalNode[] {
 	const nodes: LexicalNode[] = [];
+	const linkPattern = /\[(.+?)\]\((.+?)\)/g;
+	let linkEnd = 0;
+	let linkMatch: RegExpExecArray | null;
+
+	// Links must be isolated before parsing emphasis. URLs are opaque data, not
+	// Markdown prose: a valid URL such as a YouTube id containing `_t_` must not
+	// be interpreted as italic markup. Formatting still applies to link labels.
+	while ((linkMatch = linkPattern.exec(text)) !== null) {
+		if (linkMatch.index > linkEnd) {
+			nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.index)));
+		}
+
+		nodes.push({
+			type: 'link',
+			url: linkMatch[2],
+			rel: null,
+			target: null,
+			title: null,
+			version: 1,
+			children: parseInlineText(linkMatch[1]),
+			direction: 'ltr'
+		});
+		linkEnd = linkPattern.lastIndex;
+	}
+
+	if (linkEnd < text.length) {
+		nodes.push(...parseInlineText(text.slice(linkEnd)));
+	}
+
+	if (nodes.length === 0) {
+		return parseInlineText(text);
+	}
+
+	return nodes;
+}
+
+/** Parse formatting in ordinary text after links and their URLs are isolated. */
+function parseInlineText(text: string): LexicalNode[] {
+	const nodes: LexicalNode[] = [];
 	let current = text;
 
 	// Simple parser for inline formatting
@@ -388,11 +427,6 @@ function parseInlineFormatting(text: string): LexicalNode[] {
 	// Replace `code`
 	current = current.replace(/`(.+?)`/g, (_, content) => {
 		return `{{CODE}}${content}{{/CODE}}`;
-	});
-
-	// Replace [text](url)
-	current = current.replace(/\[(.+?)\]\((.+?)\)/g, (_, text, url) => {
-		return `{{LINK:${url}}}${text}{{/LINK}}`;
 	});
 
 	// Parse the marked-up text
@@ -438,28 +472,6 @@ function parseInlineFormatting(text: string): LexicalNode[] {
 				style: ''
 			});
 			i += 2; // Skip {{/CODE}}
-		} else if (segment.startsWith('{{LINK:')) {
-			const url = segment.match(/\{\{LINK:(.+?)\}\}/)?.[1] || '';
-			i++;
-			nodes.push({
-				type: 'link',
-				url,
-				rel: null,
-				target: null,
-				title: null,
-				version: 1,
-				children: [{
-					type: 'extended-text',
-					text: segments[i],
-					version: 1,
-					format: 0,
-					detail: 0,
-					mode: 'normal',
-					style: ''
-				}],
-				direction: 'ltr'
-			});
-			i += 2; // Skip {{/LINK}}
 		} else if (segment && !segment.startsWith('{{')) {
 			// Regular text
 			nodes.push({

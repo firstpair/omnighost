@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Markdown links now keep their URLs opaque while parsing inline emphasis, so underscores in YouTube ids and other URLs cannot corrupt Ghost headings or leak internal conversion markers.
+
 ### Added
 - Publication provenance records a canonical SHA-256 and optional source-note Git commit in hidden per-post Ghost metadata.
 - A three-mode setting can show the version and Omnighost credit, show only the linked credit, or keep the entire provenance block hidden.
