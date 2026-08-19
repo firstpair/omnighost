@@ -33,6 +33,8 @@ interface LexicalNode {
 	caption?: string;
 	// Paywall card fields
 	paywall?: boolean;
+	// HTML card fields
+	html?: string;
 }
 
 interface LexicalDocument {
@@ -63,6 +65,16 @@ export function markdownToLexical(markdown: string): string {
 		if (line.trim() === '--members-only--') {
 			nodes.push(createPaywall());
 			i++;
+			continue;
+		}
+
+		// GitHub-flavoured Markdown table. Ghost Lexical has no native table
+		// node, so preserve the structure in an HTML card instead of flattening
+		// the pipe-delimited source into a paragraph.
+		const table = parseMarkdownTable(lines, i);
+		if (table) {
+			nodes.push(createTable(table));
+			i = table.nextLine;
 			continue;
 		}
 
@@ -159,7 +171,7 @@ export function markdownToLexical(markdown: string): string {
 
 		// Regular paragraph
 		const paragraphLines: string[] = [];
-		while (i < lines.length && !isBlockStart(lines[i])) {
+		while (i < lines.length && !isBlockStart(lines[i], lines[i + 1])) {
 			paragraphLines.push(lines[i]);
 			i++;
 		}
@@ -186,7 +198,14 @@ export function markdownToLexical(markdown: string): string {
 	return JSON.stringify(lexical);
 }
 
-function isBlockStart(line: string): boolean {
+function isBlockStart(line: string, nextLine?: string): boolean {
+	if (isStandaloneBlockStart(line)) return true;
+	if (nextLine !== undefined && isTableHeader(line, nextLine)) return true;
+	return false;
+}
+
+/** Block forms which interrupt a table as well as an ordinary paragraph. */
+function isStandaloneBlockStart(line: string): boolean {
 	const trimmed = line.trim();
 	if (trimmed === '') return true;
 	if (trimmed === '--members-only--') return true;
@@ -197,6 +216,162 @@ function isBlockStart(line: string): boolean {
 	if (line.startsWith('>')) return true;
 	if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line)) return true;
 	return false;
+}
+
+type TableAlignment = 'left' | 'center' | 'right' | null;
+
+interface MarkdownTable {
+	headers: string[];
+	alignments: TableAlignment[];
+	rows: string[][];
+	nextLine: number;
+}
+
+function parseMarkdownTable(lines: string[], start: number): MarkdownTable | null {
+	const header = lines[start];
+	const delimiter = lines[start + 1];
+	if (delimiter === undefined || !isTableHeader(header, delimiter)) return null;
+
+	const headers = splitTableRow(header);
+	const delimiterCells = splitTableRow(delimiter);
+	const alignments = delimiterCells.map(parseTableAlignment);
+	const rows: string[][] = [];
+	let nextLine = start + 2;
+
+	while (nextLine < lines.length) {
+		const line = lines[nextLine];
+		// GFM tables end when another block begins. Without this check, a heading,
+		// list item, quote, or fence containing a pipe is silently consumed as a
+		// table row and disappears from the rendered document structure.
+		if (isStandaloneBlockStart(line) || !hasUnescapedPipe(line)) break;
+		const cells = splitTableRow(line).slice(0, headers.length);
+		while (cells.length < headers.length) cells.push('');
+		rows.push(cells);
+		nextLine++;
+	}
+
+	return { headers, alignments, rows, nextLine };
+}
+
+function isTableHeader(header: string, delimiter: string): boolean {
+	if (!hasUnescapedPipe(header) || !hasUnescapedPipe(delimiter)) return false;
+	const headers = splitTableRow(header);
+	const delimiters = splitTableRow(delimiter);
+	return headers.length > 0
+		&& headers.length === delimiters.length
+		&& delimiters.every(cell => /^:?-{3,}:?$/.test(cell.trim()));
+}
+
+function hasUnescapedPipe(line: string): boolean {
+	let escaped = false;
+	for (const character of line) {
+		if (character === '|' && !escaped) return true;
+		escaped = character === '\\' && !escaped;
+		if (character !== '\\') escaped = false;
+	}
+	return false;
+}
+
+function splitTableRow(line: string): string[] {
+	const trimmed = line.trim();
+	let withoutOuterPipes = trimmed.startsWith('|') ? trimmed.slice(1) : trimmed;
+	if (withoutOuterPipes.endsWith('|') && !endsWithEscapedCharacter(withoutOuterPipes, '|')) {
+		withoutOuterPipes = withoutOuterPipes.slice(0, -1);
+	}
+	const cells: string[] = [];
+	let cell = '';
+	let escaped = false;
+
+	for (const character of withoutOuterPipes) {
+		if (escaped) {
+			cell += character === '|' ? '|' : `\\${character}`;
+			escaped = false;
+		} else if (character === '\\') {
+			escaped = true;
+		} else if (character === '|') {
+			cells.push(cell.trim());
+			cell = '';
+		} else {
+			cell += character;
+		}
+	}
+	if (escaped) cell += '\\';
+	cells.push(cell.trim());
+	return cells;
+}
+
+function endsWithEscapedCharacter(value: string, character: string): boolean {
+	if (!value.endsWith(character)) return false;
+	let backslashes = 0;
+	for (let index = value.length - 2; index >= 0 && value[index] === '\\'; index--) {
+		backslashes++;
+	}
+	return backslashes % 2 === 1;
+}
+
+function parseTableAlignment(delimiter: string): TableAlignment {
+	const value = delimiter.trim();
+	if (value.startsWith(':') && value.endsWith(':')) return 'center';
+	if (value.endsWith(':')) return 'right';
+	if (value.startsWith(':')) return 'left';
+	return null;
+}
+
+function createTable(table: MarkdownTable): LexicalNode {
+	const header = table.headers.map((cell, index) =>
+		`<th${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
+	).join('');
+	const body = table.rows.map(row => `<tr>${row.map((cell, index) =>
+		`<td${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+	).join('')}</tr>`).join('');
+
+	return {
+		type: 'html',
+		version: 1,
+		html: `<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+	};
+}
+
+function tableAlignmentAttribute(alignment: TableAlignment | undefined): string {
+	return alignment ? ` style="text-align:${alignment}"` : '';
+}
+
+function inlineMarkdownToHtml(markdown: string): string {
+	return parseInlineFormatting(markdown).map(inlineLexicalNodeToHtml).join('');
+}
+
+function inlineLexicalNodeToHtml(node: LexicalNode): string {
+	if (node.type === 'link') {
+		const label = (node.children ?? []).map(inlineLexicalNodeToHtml).join('');
+		return `<a href="${escapeHtmlAttribute(safeTableHref(node.url ?? ''))}">${label}</a>`;
+	}
+
+	const text = escapeHtml(node.text ?? '');
+	if (node.format === 1) return `<strong>${text}</strong>`;
+	if (node.format === 2) return `<em>${text}</em>`;
+	if (node.format === 16) return `<code>${text}</code>`;
+	return text;
+}
+
+function safeTableHref(value: string): string {
+	const trimmed = value.trim();
+	if (/^(?:https?:|mailto:)/i.test(trimmed) || trimmed.startsWith('/') || trimmed.startsWith('#')) {
+		return trimmed;
+	}
+	return '#';
+}
+
+function escapeHtml(value: string): string {
+	return value
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#39;');
+}
+
+function escapeHtmlAttribute(value: string): string {
+	return escapeHtml(value).replace(/`/g, '&#96;');
 }
 
 function joinParagraphLines(lines: string[]): string {
@@ -364,29 +539,28 @@ function createPaywall(): LexicalNode {
  */
 function parseInlineFormatting(text: string): LexicalNode[] {
 	const nodes: LexicalNode[] = [];
-	const linkPattern = /\[(.+?)\]\((.+?)\)/g;
 	let linkEnd = 0;
-	let linkMatch: RegExpExecArray | null;
+	let linkMatch: InlineMarkdownLink | null;
 
 	// Links must be isolated before parsing emphasis. URLs are opaque data, not
 	// Markdown prose: a valid URL such as a YouTube id containing `_t_` must not
 	// be interpreted as italic markup. Formatting still applies to link labels.
-	while ((linkMatch = linkPattern.exec(text)) !== null) {
-		if (linkMatch.index > linkEnd) {
-			nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.index)));
+	while ((linkMatch = findNextInlineMarkdownLink(text, linkEnd)) !== null) {
+		if (linkMatch.start > linkEnd) {
+			nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.start)));
 		}
 
 		nodes.push({
 			type: 'link',
-			url: linkMatch[2],
+			url: linkMatch.url,
 			rel: null,
 			target: null,
 			title: null,
 			version: 1,
-			children: parseInlineText(linkMatch[1]),
+			children: parseInlineText(linkMatch.label),
 			direction: 'ltr'
 		});
-		linkEnd = linkPattern.lastIndex;
+		linkEnd = linkMatch.end;
 	}
 
 	if (linkEnd < text.length) {
@@ -398,6 +572,51 @@ function parseInlineFormatting(text: string): LexicalNode[] {
 	}
 
 	return nodes;
+}
+
+interface InlineMarkdownLink {
+	start: number;
+	end: number;
+	label: string;
+	url: string;
+}
+
+/** Find a Markdown inline link while consuming balanced URL parentheses. */
+function findNextInlineMarkdownLink(text: string, fromIndex: number): InlineMarkdownLink | null {
+	let labelStart = text.indexOf('[', fromIndex);
+
+	while (labelStart >= 0) {
+		const labelEnd = text.indexOf('](', labelStart + 1);
+		if (labelEnd < 0) return null;
+
+		const destinationStart = labelEnd + 2;
+		let depth = 1;
+		for (let index = destinationStart; index < text.length; index++) {
+			if (text[index] === '\\') {
+				index++;
+				continue;
+			}
+			if (text[index] === '(') {
+				depth++;
+				continue;
+			}
+			if (text[index] !== ')') continue;
+
+			depth--;
+			if (depth === 0 && index > destinationStart) {
+				return {
+					start: labelStart,
+					end: index + 1,
+					label: text.slice(labelStart + 1, labelEnd),
+					url: text.slice(destinationStart, index)
+				};
+			}
+		}
+
+		labelStart = text.indexOf('[', labelStart + 1);
+	}
+
+	return null;
 }
 
 /** Parse formatting in ordinary text after links and their URLs are isolated. */

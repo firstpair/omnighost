@@ -7,8 +7,13 @@ interface LexicalNode {
 	type: string;
 	text?: string;
 	url?: string;
+	html?: string;
 	format?: number | string;
 	children?: LexicalNode[];
+}
+
+function blocks(markdown: string): LexicalNode[] {
+	return (JSON.parse(markdownToLexical(markdown)) as { root: { children: LexicalNode[] } }).root.children;
 }
 
 function firstBlock(markdown: string): LexicalNode {
@@ -63,4 +68,68 @@ void test('parses multiple links without exposing internal formatting markers', 
 	assert.equal(paragraph.children?.filter(node => node.type === 'link').length, 2);
 	assert.equal(serialized.includes('{{'), false);
 	assert.equal(serialized.includes('}}'), false);
+});
+
+void test('converts a Markdown table to a responsive Ghost HTML card', () => {
+	const documentBlocks = blocks([
+		'Intro.',
+		'',
+		'| Mode | Attack safety | Utility |',
+		'|---|---:|:---:|',
+		'| Native | 0% | 100% |',
+		'| **TypeSec** | 100% | [proof](https://example.com/a_b) |',
+		'',
+		'After.'
+	].join('\n'));
+
+	assert.equal(documentBlocks.length, 3);
+	assert.equal(documentBlocks[1]?.type, 'html');
+	assert.equal(documentBlocks[1]?.html, '<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr><th>Mode</th><th style="text-align:right">Attack safety</th><th style="text-align:center">Utility</th></tr></thead><tbody><tr><td>Native</td><td style="text-align:right">0%</td><td style="text-align:center">100%</td></tr><tr><td><strong>TypeSec</strong></td><td style="text-align:right">100%</td><td style="text-align:center"><a href="https://example.com/a_b">proof</a></td></tr></tbody></table></div>');
+});
+
+void test('preserves escaped pipes and escapes unsafe table cell HTML', () => {
+	const table = firstBlock([
+		'Name | Value',
+		'--- | ---',
+		'Rust \\| Python | <script>alert("x")</script>',
+		'Unsafe link | [click](javascript:alert(1))'
+	].join('\n'));
+
+	assert.equal(table.type, 'html');
+	assert.equal(
+		table.html,
+		'<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr><th>Name</th><th>Value</th></tr></thead><tbody><tr><td>Rust | Python</td><td>&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</td></tr><tr><td>Unsafe link</td><td><a href="#">click</a></td></tr></tbody></table></div>'
+	);
+});
+
+void test('ends a table before a following block that contains a pipe', () => {
+	const documentBlocks = blocks([
+		'| Mode | Safety |',
+		'| --- | ---: |',
+		'| Native | 0% |',
+		'## Follow-up | interpretation'
+	].join('\n'));
+
+	assert.equal(documentBlocks.length, 2);
+	assert.equal(
+		documentBlocks[0]?.html,
+		'<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr><th>Mode</th><th style="text-align:right">Safety</th></tr></thead><tbody><tr><td>Native</td><td style="text-align:right">0%</td></tr></tbody></table></div>'
+	);
+	assert.equal(documentBlocks[1]?.type, 'heading');
+	assert.equal(documentBlocks[1]?.children?.map(node => node.text ?? '').join(''), 'Follow-up | interpretation');
+});
+
+void test('leaves malformed table-like Markdown as ordinary prose', () => {
+	const block = firstBlock([
+		'| Mode | Safety |',
+		'| -- | nope |',
+		'| Native | 0% |'
+	].join('\n'));
+
+	assert.equal(block.type, 'paragraph');
+	assert.equal(
+		block.children?.map(node => node.text ?? '').join(''),
+		'| Mode | Safety | | -- | nope | | Native | 0% |'
+	);
+	assert.equal(block.html, undefined);
 });
