@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- GitHub-flavored Markdown tables now publish as responsive Ghost HTML cards and round-trip back to Markdown without collapsing into a paragraph. Alignment, escaped pipes, inline formatting, safe links, and malformed-table fallback are preserved.
 - Markdown links now keep their URLs opaque while parsing inline emphasis, so underscores in YouTube ids and other URLs cannot corrupt Ghost headings or leak internal conversion markers.
 
 ### Added

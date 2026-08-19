@@ -1611,6 +1611,13 @@ ${unescapeHtml(code.trim())}
 
 `;
   });
+  md = md.replace(
+    /<table[^>]*>([\s\S]*?)<\/table>/gi,
+    (table, inner) => {
+      var _a;
+      return (_a = tableHtmlToMarkdown(inner)) != null ? _a : table;
+    }
+  );
   md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner) => {
     return inner.replace(
       /<li[^>]*>([\s\S]*?)<\/li>/gi,
@@ -1665,8 +1672,50 @@ function stripTags(html) {
 function listItemToMarkdown(html) {
   return html.replace(/<\/p>\s*<p[^>]*>/gi, " ").replace(/<\/?p[^>]*>/gi, "").replace(/<br[^>]*\/?>/gi, " ").replace(/\s+/g, " ").trim();
 }
+function tableHtmlToMarkdown(html) {
+  const rows = Array.from(html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi));
+  if (rows.length === 0)
+    return null;
+  const parsedRows = rows.map((row) => Array.from(
+    row[1].matchAll(/<(th|td)([^>]*)>([\s\S]*?)<\/\1>/gi)
+  ).map((cell) => ({
+    header: cell[1].toLowerCase() === "th",
+    attributes: cell[2],
+    content: tableCellToMarkdown(cell[3])
+  })));
+  const headerIndex = parsedRows.findIndex((row) => row.some((cell) => cell.header));
+  const effectiveHeaderIndex = headerIndex >= 0 ? headerIndex : 0;
+  const header = parsedRows[effectiveHeaderIndex];
+  if (!header || header.length === 0)
+    return null;
+  const delimiter = header.map((cell) => tableMarkdownDelimiter(cell.attributes));
+  const body = parsedRows.filter((_, index) => index !== effectiveHeaderIndex);
+  const renderRow = (cells) => `| ${header.map((_, index) => {
+    var _a, _b;
+    return (_b = (_a = cells[index]) == null ? void 0 : _a.content) != null ? _b : "";
+  }).join(" | ")} |`;
+  return [
+    renderRow(header),
+    `| ${delimiter.join(" | ")} |`,
+    ...body.map(renderRow)
+  ].join("\n") + "\n\n";
+}
+function tableCellToMarkdown(html) {
+  return html.replace(/<br[^>]*\/?>/gi, " ").replace(/<\/?p[^>]*>/gi, "").replace(/\|/g, "\\|").replace(/\s+/g, " ").trim();
+}
+function tableMarkdownDelimiter(attributes) {
+  var _a, _b;
+  const alignment = (_b = (_a = attributes.match(/(?:text-align\s*:\s*|align=["']?)(left|center|right)/i)) == null ? void 0 : _a[1]) == null ? void 0 : _b.toLowerCase();
+  if (alignment === "left")
+    return ":---";
+  if (alignment === "center")
+    return ":---:";
+  if (alignment === "right")
+    return "---:";
+  return "---";
+}
 function unescapeHtml(text) {
-  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#039;/g, "'").replace(/&nbsp;/g, " ").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&hellip;/g, "\u2026").replace(/&ldquo;/g, '"').replace(/&rdquo;/g, '"').replace(/&lsquo;/g, "'").replace(/&rsquo;/g, "'");
+  return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;|&#039;|&#x27;|&apos;/gi, "'").replace(/&nbsp;/g, " ").replace(/&mdash;/g, "\u2014").replace(/&ndash;/g, "\u2013").replace(/&hellip;/g, "\u2026").replace(/&ldquo;/g, '"').replace(/&rdquo;/g, '"').replace(/&lsquo;/g, "'").replace(/&rsquo;/g, "'");
 }
 
 // src/converters/markdown-to-lexical.ts
@@ -1684,6 +1733,12 @@ function markdownToLexical(markdown) {
     if (line.trim() === "--members-only--") {
       nodes.push(createPaywall());
       i++;
+      continue;
+    }
+    const table = parseMarkdownTable(lines, i);
+    if (table) {
+      nodes.push(createTable(table));
+      i = table.nextLine;
       continue;
     }
     const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
@@ -1761,7 +1816,7 @@ function markdownToLexical(markdown) {
       continue;
     }
     const paragraphLines = [];
-    while (i < lines.length && !isBlockStart(lines[i])) {
+    while (i < lines.length && !isBlockStart(lines[i], lines[i + 1])) {
       paragraphLines.push(lines[i]);
       i++;
     }
@@ -1782,7 +1837,14 @@ function markdownToLexical(markdown) {
   };
   return JSON.stringify(lexical);
 }
-function isBlockStart(line) {
+function isBlockStart(line, nextLine) {
+  if (isStandaloneBlockStart(line))
+    return true;
+  if (nextLine !== void 0 && isTableHeader(line, nextLine))
+    return true;
+  return false;
+}
+function isStandaloneBlockStart(line) {
   const trimmed = line.trim();
   if (trimmed === "")
     return true;
@@ -1801,6 +1863,139 @@ function isBlockStart(line) {
   if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line))
     return true;
   return false;
+}
+function parseMarkdownTable(lines, start) {
+  const header = lines[start];
+  const delimiter = lines[start + 1];
+  if (delimiter === void 0 || !isTableHeader(header, delimiter))
+    return null;
+  const headers = splitTableRow(header);
+  const delimiterCells = splitTableRow(delimiter);
+  const alignments = delimiterCells.map(parseTableAlignment);
+  const rows = [];
+  let nextLine = start + 2;
+  while (nextLine < lines.length) {
+    const line = lines[nextLine];
+    if (isStandaloneBlockStart(line) || !hasUnescapedPipe(line))
+      break;
+    const cells = splitTableRow(line).slice(0, headers.length);
+    while (cells.length < headers.length)
+      cells.push("");
+    rows.push(cells);
+    nextLine++;
+  }
+  return { headers, alignments, rows, nextLine };
+}
+function isTableHeader(header, delimiter) {
+  if (!hasUnescapedPipe(header) || !hasUnescapedPipe(delimiter))
+    return false;
+  const headers = splitTableRow(header);
+  const delimiters = splitTableRow(delimiter);
+  return headers.length > 0 && headers.length === delimiters.length && delimiters.every((cell) => /^:?-{3,}:?$/.test(cell.trim()));
+}
+function hasUnescapedPipe(line) {
+  let escaped = false;
+  for (const character of line) {
+    if (character === "|" && !escaped)
+      return true;
+    escaped = character === "\\" && !escaped;
+    if (character !== "\\")
+      escaped = false;
+  }
+  return false;
+}
+function splitTableRow(line) {
+  const trimmed = line.trim();
+  let withoutOuterPipes = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+  if (withoutOuterPipes.endsWith("|") && !endsWithEscapedCharacter(withoutOuterPipes, "|")) {
+    withoutOuterPipes = withoutOuterPipes.slice(0, -1);
+  }
+  const cells = [];
+  let cell = "";
+  let escaped = false;
+  for (const character of withoutOuterPipes) {
+    if (escaped) {
+      cell += character === "|" ? "|" : `\\${character}`;
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += character;
+    }
+  }
+  if (escaped)
+    cell += "\\";
+  cells.push(cell.trim());
+  return cells;
+}
+function endsWithEscapedCharacter(value, character) {
+  if (!value.endsWith(character))
+    return false;
+  let backslashes = 0;
+  for (let index = value.length - 2; index >= 0 && value[index] === "\\"; index--) {
+    backslashes++;
+  }
+  return backslashes % 2 === 1;
+}
+function parseTableAlignment(delimiter) {
+  const value = delimiter.trim();
+  if (value.startsWith(":") && value.endsWith(":"))
+    return "center";
+  if (value.endsWith(":"))
+    return "right";
+  if (value.startsWith(":"))
+    return "left";
+  return null;
+}
+function createTable(table) {
+  const header = table.headers.map(
+    (cell, index) => `<th${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
+  ).join("");
+  const body = table.rows.map((row) => `<tr>${row.map(
+    (cell, index) => `<td${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+  ).join("")}</tr>`).join("");
+  return {
+    type: "html",
+    version: 1,
+    html: `<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+  };
+}
+function tableAlignmentAttribute(alignment) {
+  return alignment ? ` style="text-align:${alignment}"` : "";
+}
+function inlineMarkdownToHtml(markdown) {
+  return parseInlineFormatting(markdown).map(inlineLexicalNodeToHtml).join("");
+}
+function inlineLexicalNodeToHtml(node) {
+  var _a, _b, _c;
+  if (node.type === "link") {
+    const label = ((_a = node.children) != null ? _a : []).map(inlineLexicalNodeToHtml).join("");
+    return `<a href="${escapeHtmlAttribute2(safeTableHref((_b = node.url) != null ? _b : ""))}">${label}</a>`;
+  }
+  const text = escapeHtml((_c = node.text) != null ? _c : "");
+  if (node.format === 1)
+    return `<strong>${text}</strong>`;
+  if (node.format === 2)
+    return `<em>${text}</em>`;
+  if (node.format === 16)
+    return `<code>${text}</code>`;
+  return text;
+}
+function safeTableHref(value) {
+  const trimmed = value.trim();
+  if (/^(?:https?:|mailto:)/i.test(trimmed) || trimmed.startsWith("/") || trimmed.startsWith("#")) {
+    return trimmed;
+  }
+  return "#";
+}
+function escapeHtml(value) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function escapeHtmlAttribute2(value) {
+  return escapeHtml(value).replace(/`/g, "&#96;");
 }
 function joinParagraphLines(lines) {
   return lines.map((paragraphLine) => paragraphLine.trim()).join(" ");
@@ -1930,24 +2125,23 @@ function createPaywall() {
 }
 function parseInlineFormatting(text) {
   const nodes = [];
-  const linkPattern = /\[(.+?)\]\((.+?)\)/g;
   let linkEnd = 0;
   let linkMatch;
-  while ((linkMatch = linkPattern.exec(text)) !== null) {
-    if (linkMatch.index > linkEnd) {
-      nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.index)));
+  while ((linkMatch = findNextInlineMarkdownLink(text, linkEnd)) !== null) {
+    if (linkMatch.start > linkEnd) {
+      nodes.push(...parseInlineText(text.slice(linkEnd, linkMatch.start)));
     }
     nodes.push({
       type: "link",
-      url: linkMatch[2],
+      url: linkMatch.url,
       rel: null,
       target: null,
       title: null,
       version: 1,
-      children: parseInlineText(linkMatch[1]),
+      children: parseInlineText(linkMatch.label),
       direction: "ltr"
     });
-    linkEnd = linkPattern.lastIndex;
+    linkEnd = linkMatch.end;
   }
   if (linkEnd < text.length) {
     nodes.push(...parseInlineText(text.slice(linkEnd)));
@@ -1956,6 +2150,39 @@ function parseInlineFormatting(text) {
     return parseInlineText(text);
   }
   return nodes;
+}
+function findNextInlineMarkdownLink(text, fromIndex) {
+  let labelStart = text.indexOf("[", fromIndex);
+  while (labelStart >= 0) {
+    const labelEnd = text.indexOf("](", labelStart + 1);
+    if (labelEnd < 0)
+      return null;
+    const destinationStart = labelEnd + 2;
+    let depth = 1;
+    for (let index = destinationStart; index < text.length; index++) {
+      if (text[index] === "\\") {
+        index++;
+        continue;
+      }
+      if (text[index] === "(") {
+        depth++;
+        continue;
+      }
+      if (text[index] !== ")")
+        continue;
+      depth--;
+      if (depth === 0 && index > destinationStart) {
+        return {
+          start: labelStart,
+          end: index + 1,
+          label: text.slice(labelStart + 1, labelEnd),
+          url: text.slice(destinationStart, index)
+        };
+      }
+    }
+    labelStart = text.indexOf("[", labelStart + 1);
+  }
+  return null;
 }
 function parseInlineText(text) {
   const nodes = [];

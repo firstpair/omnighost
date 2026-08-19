@@ -51,6 +51,14 @@ export function htmlToMarkdown(html: string): string {
 		return `${quoted}\n\n`;
 	});
 
+	// ── Tables ──────────────────────────────────────────────────────────────
+	// Omnighost publishes Markdown tables as Ghost HTML cards because Lexical
+	// has no native table node. Reconstruct Markdown before the generic inline
+	// and tag passes so importing the post remains lossless.
+	md = md.replace(/<table[^>]*>([\s\S]*?)<\/table>/gi, (table: string, inner: string) =>
+		tableHtmlToMarkdown(inner) ?? table
+	);
+
 	// ── Lists ───────────────────────────────────────────────────────────────
 	// Unordered
 	md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_, inner: string) => {
@@ -144,6 +152,51 @@ function listItemToMarkdown(html: string): string {
 		.trim();
 }
 
+function tableHtmlToMarkdown(html: string): string | null {
+	const rows = Array.from(html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi));
+	if (rows.length === 0) return null;
+
+	const parsedRows = rows.map(row => Array.from(
+		row[1].matchAll(/<(th|td)([^>]*)>([\s\S]*?)<\/\1>/gi)
+	).map(cell => ({
+		header: cell[1].toLowerCase() === 'th',
+		attributes: cell[2],
+		content: tableCellToMarkdown(cell[3])
+	})));
+	const headerIndex = parsedRows.findIndex(row => row.some(cell => cell.header));
+	const effectiveHeaderIndex = headerIndex >= 0 ? headerIndex : 0;
+	const header = parsedRows[effectiveHeaderIndex];
+	if (!header || header.length === 0) return null;
+
+	const delimiter = header.map(cell => tableMarkdownDelimiter(cell.attributes));
+	const body = parsedRows.filter((_, index) => index !== effectiveHeaderIndex);
+	const renderRow = (cells: Array<{ content: string }>) =>
+		`| ${header.map((_, index) => cells[index]?.content ?? '').join(' | ')} |`;
+
+	return [
+		renderRow(header),
+		`| ${delimiter.join(' | ')} |`,
+		...body.map(renderRow)
+	].join('\n') + '\n\n';
+}
+
+function tableCellToMarkdown(html: string): string {
+	return html
+		.replace(/<br[^>]*\/?>/gi, ' ')
+		.replace(/<\/?p[^>]*>/gi, '')
+		.replace(/\|/g, '\\|')
+		.replace(/\s+/g, ' ')
+		.trim();
+}
+
+function tableMarkdownDelimiter(attributes: string): string {
+	const alignment = attributes.match(/(?:text-align\s*:\s*|align=["']?)(left|center|right)/i)?.[1]?.toLowerCase();
+	if (alignment === 'left') return ':---';
+	if (alignment === 'center') return ':---:';
+	if (alignment === 'right') return '---:';
+	return '---';
+}
+
 /**
  * Decode common HTML entities.
  */
@@ -153,7 +206,7 @@ function unescapeHtml(text: string): string {
 		.replace(/&lt;/g, '<')
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
-		.replace(/&#039;/g, "'")
+		.replace(/&#39;|&#039;|&#x27;|&apos;/gi, "'")
 		.replace(/&nbsp;/g, ' ')
 		.replace(/&mdash;/g, '—')
 		.replace(/&ndash;/g, '–')

@@ -47,3 +47,30 @@ void test('imports Ghost HTML ordered lists as separate Markdown items', () => {
 		'1. Alpha\n2. Beta with [link](https://example.com)'
 	);
 });
+
+void test('round-trips an Omnighost HTML-card table to Markdown', () => {
+	const html = '<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr><th>Mode</th><th style="text-align:right">Safety</th><th style="text-align:center">Proof</th></tr></thead><tbody><tr><td><strong>TypeSec</strong></td><td style="text-align:right">100%</td><td style="text-align:center"><a href="https://example.com/a_b">receipt</a></td></tr><tr><td>Rust | Python</td><td style="text-align:right">64%</td><td></td></tr></tbody></table></div>';
+
+	assert.equal(
+		htmlToMarkdown(html),
+		'| Mode | Safety | Proof |\n| --- | ---: | :---: |\n| **TypeSec** | 100% | [receipt](https://example.com/a_b) |\n| Rust \\| Python | 64% |  |'
+	);
+});
+
+void test('preserves malformed table content instead of deleting it', () => {
+	const html = '<p>Before.</p><table><p>Unstructured fallback.</p></table><p>After.</p>';
+
+	assert.equal(
+		htmlToMarkdown(html),
+		'Before.\n\nUnstructured fallback.\n\nAfter.'
+	);
+});
+
+void test('decodes the entities emitted by table HTML escaping', () => {
+	const html = '<table><thead><tr><th>Owner</th><th>State</th></tr></thead><tbody><tr><td>Agent&#39;s</td><td>&lt;ready&gt; &amp; safe</td></tr></tbody></table>';
+
+	assert.equal(
+		htmlToMarkdown(html),
+		"| Owner | State |\n| --- | --- |\n| Agent's | <ready> & safe |"
+	);
+});
