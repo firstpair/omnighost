@@ -41,6 +41,9 @@ interface LexicalDocument {
 	root: LexicalNode;
 }
 
+const UNORDERED_LIST_ITEM_PATTERN = /^[*\-+]\s+(.*)$/;
+const ORDERED_LIST_ITEM_PATTERN = /^\d+\.\s+(.*)$/;
+
 /**
  * Convert markdown to Lexical format
  * Skips the first H1 heading (as it's used for the title field)
@@ -97,24 +100,18 @@ export function markdownToLexical(markdown: string): string {
 		}
 
 		// Unordered list
-		if (line.match(/^[*\-+]\s+/)) {
-			const listItems: string[] = [];
-			while (i < lines.length && lines[i].match(/^[*\-+]\s+/)) {
-				listItems.push(lines[i].replace(/^[*\-+]\s+/, ''));
-				i++;
-			}
-			nodes.push(createUnorderedList(listItems));
+		if (UNORDERED_LIST_ITEM_PATTERN.test(line)) {
+			const list = parseListItems(lines, i, UNORDERED_LIST_ITEM_PATTERN);
+			nodes.push(createUnorderedList(list.items));
+			i = list.nextLine;
 			continue;
 		}
 
 		// Ordered list
-		if (line.match(/^\d+\.\s+/)) {
-			const listItems: string[] = [];
-			while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
-				listItems.push(lines[i].replace(/^\d+\.\s+/, ''));
-				i++;
-			}
-			nodes.push(createOrderedList(listItems));
+		if (ORDERED_LIST_ITEM_PATTERN.test(line)) {
+			const list = parseListItems(lines, i, ORDERED_LIST_ITEM_PATTERN);
+			nodes.push(createOrderedList(list.items));
+			i = list.nextLine;
 			continue;
 		}
 
@@ -204,14 +201,44 @@ function isBlockStart(line: string, nextLine?: string): boolean {
 	return false;
 }
 
+interface ParsedListItems {
+	items: string[];
+	nextLine: number;
+}
+
+/**
+ * Parse consecutive list items and their wrapped paragraph continuations.
+ * CommonMark permits both content-indented lines and unindented lazy lines;
+ * either form belongs to the current item until a blank or new block begins.
+ */
+function parseListItems(lines: string[], start: number, itemPattern: RegExp): ParsedListItems {
+	const items: string[] = [];
+	let nextLine = start;
+
+	while (nextLine < lines.length) {
+		const item = lines[nextLine].match(itemPattern);
+		if (!item) break;
+
+		const itemLines = [item[1]];
+		nextLine++;
+		while (nextLine < lines.length && !isBlockStart(lines[nextLine], lines[nextLine + 1])) {
+			itemLines.push(lines[nextLine]);
+			nextLine++;
+		}
+		items.push(joinParagraphLines(itemLines));
+	}
+
+	return { items, nextLine };
+}
+
 /** Block forms which interrupt a table as well as an ordinary paragraph. */
 function isStandaloneBlockStart(line: string): boolean {
 	const trimmed = line.trim();
 	if (trimmed === '') return true;
 	if (trimmed === '--members-only--') return true;
 	if (/^(#{1,6})\s+(.+)$/.test(line)) return true;
-	if (/^[*\-+]\s+/.test(line)) return true;
-	if (/^\d+\.\s+/.test(line)) return true;
+	if (UNORDERED_LIST_ITEM_PATTERN.test(line)) return true;
+	if (ORDERED_LIST_ITEM_PATTERN.test(line)) return true;
 	if (line.startsWith('```')) return true;
 	if (line.startsWith('>')) return true;
 	if (/^!\[([^\]]*)\]\(([^)]+)\)\s*$/.test(line)) return true;
@@ -219,6 +246,11 @@ function isStandaloneBlockStart(line: string): boolean {
 }
 
 type TableAlignment = 'left' | 'center' | 'right' | null;
+type TableCellKind = 'header' | 'body';
+
+const TABLE_STYLE = 'width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0';
+const TABLE_HEADER_CELL_STYLE = 'padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap';
+const TABLE_BODY_CELL_STYLE = 'padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top';
 
 interface MarkdownTable {
 	headers: string[];
@@ -319,21 +351,23 @@ function parseTableAlignment(delimiter: string): TableAlignment {
 
 function createTable(table: MarkdownTable): LexicalNode {
 	const header = table.headers.map((cell, index) =>
-		`<th${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
+		`<th${tableCellStyleAttribute('header', table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
 	).join('');
 	const body = table.rows.map(row => `<tr>${row.map((cell, index) =>
-		`<td${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+		`<td${tableCellStyleAttribute('body', table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
 	).join('')}</tr>`).join('');
 
 	return {
 		type: 'html',
 		version: 1,
-		html: `<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+		html: `<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="${TABLE_STYLE}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
 	};
 }
 
-function tableAlignmentAttribute(alignment: TableAlignment | undefined): string {
-	return alignment ? ` style="text-align:${alignment}"` : '';
+function tableCellStyleAttribute(kind: TableCellKind, alignment: TableAlignment | undefined): string {
+	const baseStyle = kind === 'header' ? TABLE_HEADER_CELL_STYLE : TABLE_BODY_CELL_STYLE;
+	const safeAlignment = alignment ?? 'left';
+	return ` style="${baseStyle};text-align:${safeAlignment}"`;
 }
 
 function inlineMarkdownToHtml(markdown: string): string {

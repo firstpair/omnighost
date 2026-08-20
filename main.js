@@ -1719,6 +1719,8 @@ function unescapeHtml(text) {
 }
 
 // src/converters/markdown-to-lexical.ts
+var UNORDERED_LIST_ITEM_PATTERN = /^[*\-+]\s+(.*)$/;
+var ORDERED_LIST_ITEM_PATTERN = /^\d+\.\s+(.*)$/;
 function markdownToLexical(markdown) {
   const nodes = [];
   const lines = markdown.split("\n");
@@ -1754,22 +1756,16 @@ function markdownToLexical(markdown) {
       i++;
       continue;
     }
-    if (line.match(/^[*\-+]\s+/)) {
-      const listItems = [];
-      while (i < lines.length && lines[i].match(/^[*\-+]\s+/)) {
-        listItems.push(lines[i].replace(/^[*\-+]\s+/, ""));
-        i++;
-      }
-      nodes.push(createUnorderedList(listItems));
+    if (UNORDERED_LIST_ITEM_PATTERN.test(line)) {
+      const list = parseListItems(lines, i, UNORDERED_LIST_ITEM_PATTERN);
+      nodes.push(createUnorderedList(list.items));
+      i = list.nextLine;
       continue;
     }
-    if (line.match(/^\d+\.\s+/)) {
-      const listItems = [];
-      while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
-        listItems.push(lines[i].replace(/^\d+\.\s+/, ""));
-        i++;
-      }
-      nodes.push(createOrderedList(listItems));
+    if (ORDERED_LIST_ITEM_PATTERN.test(line)) {
+      const list = parseListItems(lines, i, ORDERED_LIST_ITEM_PATTERN);
+      nodes.push(createOrderedList(list.items));
+      i = list.nextLine;
       continue;
     }
     if (line.startsWith("```")) {
@@ -1844,6 +1840,23 @@ function isBlockStart(line, nextLine) {
     return true;
   return false;
 }
+function parseListItems(lines, start, itemPattern) {
+  const items = [];
+  let nextLine = start;
+  while (nextLine < lines.length) {
+    const item = lines[nextLine].match(itemPattern);
+    if (!item)
+      break;
+    const itemLines = [item[1]];
+    nextLine++;
+    while (nextLine < lines.length && !isBlockStart(lines[nextLine], lines[nextLine + 1])) {
+      itemLines.push(lines[nextLine]);
+      nextLine++;
+    }
+    items.push(joinParagraphLines(itemLines));
+  }
+  return { items, nextLine };
+}
 function isStandaloneBlockStart(line) {
   const trimmed = line.trim();
   if (trimmed === "")
@@ -1852,9 +1865,9 @@ function isStandaloneBlockStart(line) {
     return true;
   if (/^(#{1,6})\s+(.+)$/.test(line))
     return true;
-  if (/^[*\-+]\s+/.test(line))
+  if (UNORDERED_LIST_ITEM_PATTERN.test(line))
     return true;
-  if (/^\d+\.\s+/.test(line))
+  if (ORDERED_LIST_ITEM_PATTERN.test(line))
     return true;
   if (line.startsWith("```"))
     return true;
@@ -1864,6 +1877,9 @@ function isStandaloneBlockStart(line) {
     return true;
   return false;
 }
+var TABLE_STYLE = "width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0";
+var TABLE_HEADER_CELL_STYLE = "padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap";
+var TABLE_BODY_CELL_STYLE = "padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top";
 function parseMarkdownTable(lines, start) {
   const header = lines[start];
   const delimiter = lines[start + 1];
@@ -1952,19 +1968,21 @@ function parseTableAlignment(delimiter) {
 }
 function createTable(table) {
   const header = table.headers.map(
-    (cell, index) => `<th${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
+    (cell, index) => `<th${tableCellStyleAttribute("header", table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
   ).join("");
   const body = table.rows.map((row) => `<tr>${row.map(
-    (cell, index) => `<td${tableAlignmentAttribute(table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+    (cell, index) => `<td${tableCellStyleAttribute("body", table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
   ).join("")}</tr>`).join("");
   return {
     type: "html",
     version: 1,
-    html: `<div class="omnighost-table" style="overflow-x:auto"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+    html: `<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="${TABLE_STYLE}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
   };
 }
-function tableAlignmentAttribute(alignment) {
-  return alignment ? ` style="text-align:${alignment}"` : "";
+function tableCellStyleAttribute(kind, alignment) {
+  const baseStyle = kind === "header" ? TABLE_HEADER_CELL_STYLE : TABLE_BODY_CELL_STYLE;
+  const safeAlignment = alignment != null ? alignment : "left";
+  return ` style="${baseStyle};text-align:${safeAlignment}"`;
 }
 function inlineMarkdownToHtml(markdown) {
   return parseInlineFormatting(markdown).map(inlineLexicalNodeToHtml).join("");
