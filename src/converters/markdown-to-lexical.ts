@@ -248,9 +248,10 @@ function isStandaloneBlockStart(line: string): boolean {
 type TableAlignment = 'left' | 'center' | 'right' | null;
 type TableCellKind = 'header' | 'body';
 
-const TABLE_STYLE = 'width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0';
+const TABLE_STYLE = 'width:100%;min-width:640px;border-collapse:collapse;border-spacing:0';
 const TABLE_HEADER_CELL_STYLE = 'padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap';
 const TABLE_BODY_CELL_STYLE = 'padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top';
+const TABLE_COMPACT_CELL_STYLE = 'white-space:nowrap';
 
 interface MarkdownTable {
 	headers: string[];
@@ -354,7 +355,7 @@ function createTable(table: MarkdownTable): LexicalNode {
 		`<th${tableCellStyleAttribute('header', table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
 	).join('');
 	const body = table.rows.map(row => `<tr>${row.map((cell, index) =>
-		`<td${tableCellStyleAttribute('body', table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+		`<td${tableCellStyleAttribute('body', table.alignments[index], isCompactTableCell(cell))}>${inlineMarkdownToHtml(cell)}</td>`
 	).join('')}</tr>`).join('');
 
 	return {
@@ -364,10 +365,17 @@ function createTable(table: MarkdownTable): LexicalNode {
 	};
 }
 
-function tableCellStyleAttribute(kind: TableCellKind, alignment: TableAlignment | undefined): string {
+function tableCellStyleAttribute(kind: TableCellKind, alignment: TableAlignment | undefined, compact = false): string {
 	const baseStyle = kind === 'header' ? TABLE_HEADER_CELL_STYLE : TABLE_BODY_CELL_STYLE;
 	const safeAlignment = alignment ?? 'left';
-	return ` style="${baseStyle};text-align:${safeAlignment}"`;
+	const compactStyle = kind === 'body' && compact ? `;${TABLE_COMPACT_CELL_STYLE}` : '';
+	return ` style="${baseStyle};text-align:${safeAlignment}${compactStyle}"`;
+}
+
+/** Keep short identifiers and measurements together while allowing prose to wrap. */
+function isCompactTableCell(markdown: string): boolean {
+	const unformatted = markdown.replace(/[*_`~]/g, '').trim();
+	return unformatted.length > 0 && unformatted.length <= 24 && !/\s/.test(unformatted);
 }
 
 function inlineMarkdownToHtml(markdown: string): string {

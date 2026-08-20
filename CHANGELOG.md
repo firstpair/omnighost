@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Responsive Ghost tables now use a root-font-independent 640px minimum and keep compact identifiers and measurements on one line, while prose cells remain free to wrap.
 - GitHub-flavored Markdown tables now publish as responsive, theme-independent Ghost HTML cards and round-trip back to Markdown without collapsing into a paragraph. Alignment, escaped pipes, inline formatting, safe links, readable cell spacing, and malformed-table fallback are preserved.
 - Wrapped unordered and ordered list items now retain both indented and CommonMark lazy continuation lines instead of splitting them into stray paragraphs.
 - Markdown links now keep their URLs opaque while parsing inline emphasis, so underscores in YouTube ids and other URLs cannot corrupt Ghost headings or leak internal conversion markers.
