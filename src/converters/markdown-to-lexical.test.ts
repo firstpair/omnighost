@@ -144,7 +144,7 @@ void test('ends a wrapped list before a following table header', () => {
 	assert.deepEqual(listItemTexts(documentBlocks[0]), ['Keep the list item wrapped before the table.']);
 	assert.equal(
 		documentBlocks[1]?.html,
-		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Safety</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right">0%</td></tr></tbody></table></div>'
+		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:640px;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Safety</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left;white-space:nowrap">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right;white-space:nowrap">0%</td></tr></tbody></table></div>'
 	);
 });
 
@@ -162,12 +162,29 @@ void test('converts a Markdown table to a responsive Ghost HTML card', () => {
 
 	assert.equal(documentBlocks.length, 3);
 	assert.equal(documentBlocks[1]?.type, 'html');
-	assert.equal(documentBlocks[1]?.html, '<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Attack safety</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:center">Utility</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right">0%</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:center">100%</td></tr><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left"><strong>TypeSec</strong></td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right">100%</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:center"><a href="https://example.com/a_b">proof</a></td></tr></tbody></table></div>');
+	assert.equal(documentBlocks[1]?.html, '<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:640px;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Attack safety</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:center">Utility</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left;white-space:nowrap">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right;white-space:nowrap">0%</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:center;white-space:nowrap">100%</td></tr><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left;white-space:nowrap"><strong>TypeSec</strong></td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right;white-space:nowrap">100%</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:center"><a href="https://example.com/a_b">proof</a></td></tr></tbody></table></div>');
 	const tableHtml = documentBlocks[1]?.html ?? '';
 	assert.equal((tableHtml.match(/padding:0\.625rem 0\.75rem/g) ?? []).length, 9);
 	assert.equal((tableHtml.match(/border-bottom:2px solid currentColor/g) ?? []).length, 3);
 	assert.equal((tableHtml.match(/border-bottom:1px solid rgba\(127,127,127,0\.35\)/g) ?? []).length, 6);
 	assert.equal((tableHtml.match(/text-align:(?:left|right|center)/g) ?? []).length, 9);
+	assert.equal((tableHtml.match(/white-space:nowrap/g) ?? []).length, 8);
+});
+
+void test('keeps compact table values together while allowing prose cells to wrap', () => {
+	const table = firstBlock([
+		'| Key | Explanation |',
+		'| --- | --- |',
+		'| agent-17 | This prose cell should remain free to wrap naturally. |'
+	].join('\n'));
+	const html = table.html ?? '';
+	const bodyStyles = Array.from(html.matchAll(/<td style="([^"]*)"/g), match => match[1]);
+
+	assert.equal(html.includes('min-width:640px'), true);
+	assert.deepEqual(bodyStyles, [
+		'padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left;white-space:nowrap',
+		'padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left'
+	]);
 });
 
 void test('preserves escaped pipes and escapes unsafe table cell HTML', () => {
@@ -181,14 +198,14 @@ void test('preserves escaped pipes and escapes unsafe table cell HTML', () => {
 	assert.equal(table.type, 'html');
 	assert.equal(
 		table.html,
-		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Name</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Value</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Rust | Python</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</td></tr><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Unsafe link</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left"><a href="#">click</a></td></tr></tbody></table></div>'
+		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:640px;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Name</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Value</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Rust | Python</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;</td></tr><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Unsafe link</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left"><a href="#">click</a></td></tr></tbody></table></div>'
 	);
 	const styles = Array.from((table.html ?? '').matchAll(/ style="([^"]*)"/g), match => match[1]);
 	const headerStyle = 'padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left';
 	const bodyStyle = 'padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left';
 	assert.deepEqual(styles.slice(0, 2), [
 		'max-width:100%;overflow-x:auto',
-		'width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0'
+		'width:100%;min-width:640px;border-collapse:collapse;border-spacing:0'
 	]);
 	assert.deepEqual(styles.slice(2, 4), [headerStyle, headerStyle]);
 	assert.equal(styles.slice(4).length, 4);
@@ -206,7 +223,7 @@ void test('ends a table before a following block that contains a pipe', () => {
 	assert.equal(documentBlocks.length, 2);
 	assert.equal(
 		documentBlocks[0]?.html,
-		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Safety</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right">0%</td></tr></tbody></table></div>'
+		'<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="width:100%;min-width:640px;border-collapse:collapse;border-spacing:0"><thead><tr><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:left">Mode</th><th style="padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap;text-align:right">Safety</th></tr></thead><tbody><tr><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:left;white-space:nowrap">Native</td><td style="padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top;text-align:right;white-space:nowrap">0%</td></tr></tbody></table></div>'
 	);
 	assert.equal(documentBlocks[1]?.type, 'heading');
 	assert.equal(documentBlocks[1]?.children?.map(node => node.text ?? '').join(''), 'Follow-up | interpretation');

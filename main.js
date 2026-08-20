@@ -1877,9 +1877,10 @@ function isStandaloneBlockStart(line) {
     return true;
   return false;
 }
-var TABLE_STYLE = "width:100%;min-width:40rem;border-collapse:collapse;border-spacing:0";
+var TABLE_STYLE = "width:100%;min-width:640px;border-collapse:collapse;border-spacing:0";
 var TABLE_HEADER_CELL_STYLE = "padding:0.625rem 0.75rem;border-bottom:2px solid currentColor;background-color:rgba(127,127,127,0.12);font-weight:700;vertical-align:bottom;white-space:nowrap";
 var TABLE_BODY_CELL_STYLE = "padding:0.625rem 0.75rem;border-bottom:1px solid rgba(127,127,127,0.35);vertical-align:top";
+var TABLE_COMPACT_CELL_STYLE = "white-space:nowrap";
 function parseMarkdownTable(lines, start) {
   const header = lines[start];
   const delimiter = lines[start + 1];
@@ -1971,7 +1972,7 @@ function createTable(table) {
     (cell, index) => `<th${tableCellStyleAttribute("header", table.alignments[index])}>${inlineMarkdownToHtml(cell)}</th>`
   ).join("");
   const body = table.rows.map((row) => `<tr>${row.map(
-    (cell, index) => `<td${tableCellStyleAttribute("body", table.alignments[index])}>${inlineMarkdownToHtml(cell)}</td>`
+    (cell, index) => `<td${tableCellStyleAttribute("body", table.alignments[index], isCompactTableCell(cell))}>${inlineMarkdownToHtml(cell)}</td>`
   ).join("")}</tr>`).join("");
   return {
     type: "html",
@@ -1979,10 +1980,15 @@ function createTable(table) {
     html: `<div class="omnighost-table" style="max-width:100%;overflow-x:auto"><table style="${TABLE_STYLE}"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
   };
 }
-function tableCellStyleAttribute(kind, alignment) {
+function tableCellStyleAttribute(kind, alignment, compact = false) {
   const baseStyle = kind === "header" ? TABLE_HEADER_CELL_STYLE : TABLE_BODY_CELL_STYLE;
   const safeAlignment = alignment != null ? alignment : "left";
-  return ` style="${baseStyle};text-align:${safeAlignment}"`;
+  const compactStyle = kind === "body" && compact ? `;${TABLE_COMPACT_CELL_STYLE}` : "";
+  return ` style="${baseStyle};text-align:${safeAlignment}${compactStyle}"`;
+}
+function isCompactTableCell(markdown) {
+  const unformatted = markdown.replace(/[*_`~]/g, "").trim();
+  return unformatted.length > 0 && unformatted.length <= 24 && !/\s/.test(unformatted);
 }
 function inlineMarkdownToHtml(markdown) {
   return parseInlineFormatting(markdown).map(inlineLexicalNodeToHtml).join("");
