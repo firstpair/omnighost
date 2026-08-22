@@ -7,6 +7,7 @@ import { preparePublicationProvenance } from '../versioning/publication-provenan
 import type { GhostAuthMode, GhostPost, GhostPostWrite } from '../types';
 
 interface RequestOptions {
+	url?: string;
 	method?: string;
 	headers?: Record<string, string>;
 }
@@ -18,6 +19,7 @@ interface RequestResponse {
 }
 
 interface GhostApiClientLike {
+	testConnection(): Promise<string | null>;
 	getPosts(): Promise<GhostPost[]>;
 	updatePost(
 		postId: string,
@@ -35,6 +37,60 @@ interface ApiClientModule {
 }
 
 type RequestHandler = (options: RequestOptions) => Promise<RequestResponse>;
+
+void test('connection testing requires an authenticated Admin API read', async () => {
+	const urls: string[] = [];
+	const runtime = globalThis as typeof globalThis & { __omnighostApiRequest?: RequestHandler };
+	runtime.__omnighostApiRequest = async (options) => {
+		urls.push(options.url ?? '');
+		if (options.url?.includes('/posts/')) {
+			return { status: 401, text: 'Unknown Admin API Key', json: { errors: [] } };
+		}
+		return { status: 200, text: '', json: { site: { title: 'False positive' } } };
+	};
+	const originalError = console.error;
+	console.error = () => {};
+	try {
+		const module = await loadApiClient();
+		const client = new module.GhostAPIClient(
+			'https://example.com',
+			`0123456789abcdef01234567:${'00'.repeat(32)}`,
+			{}
+		);
+		assert.equal(await client.testConnection(), null);
+		assert.equal(urls.length, 1);
+		assert.match(urls[0] ?? '', /\/posts\/\?limit=1&fields=id$/);
+	} finally {
+		console.error = originalError;
+		delete runtime.__omnighostApiRequest;
+	}
+});
+
+void test('connection testing reports the site title after authentication succeeds', async () => {
+	const urls: string[] = [];
+	const runtime = globalThis as typeof globalThis & { __omnighostApiRequest?: RequestHandler };
+	runtime.__omnighostApiRequest = async (options) => {
+		urls.push(options.url ?? '');
+		if (options.url?.includes('/posts/')) {
+			return { status: 200, text: '', json: { posts: [] } };
+		}
+		return { status: 200, text: '', json: { site: { title: 'Chief.sc' } } };
+	};
+	try {
+		const module = await loadApiClient();
+		const client = new module.GhostAPIClient(
+			'https://example.com',
+			`0123456789abcdef01234567:${'00'.repeat(32)}`,
+			{}
+		);
+		assert.equal(await client.testConnection(), 'Chief.sc');
+		assert.equal(urls.length, 2);
+		assert.match(urls[0] ?? '', /\/posts\/\?limit=1&fields=id$/);
+		assert.match(urls[1] ?? '', /\/site\/$/);
+	} finally {
+		delete runtime.__omnighostApiRequest;
+	}
+});
 
 async function loadApiClient(): Promise<ApiClientModule> {
 	const result = await build({

@@ -1033,6 +1033,11 @@ Content-Type: ${upload.mimeType}\r
   async testConnection() {
     var _a, _b;
     try {
+      const authenticated = await this.makeRequest("/posts/?limit=1&fields=id");
+      if (authenticated.status !== 200) {
+        console.error("Ghost authenticated connection test failed:", authenticated.status, authenticated.text);
+        return null;
+      }
       const response = await this.makeRequest("/site/");
       if (response.status === 200) {
         const title = (_b = (_a = response.json) == null ? void 0 : _a.site) == null ? void 0 : _b.title;

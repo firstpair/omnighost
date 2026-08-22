@@ -469,6 +469,16 @@ export class GhostAPIClient {
 	 */
 	async testConnection(): Promise<string | null> {
 		try {
+			// `/site/` is intentionally readable without a valid Admin key on
+			// current Ghost releases, so it cannot prove connectivity. Exercise a
+			// read-only authenticated posts endpoint first; this catches revoked or
+			// database-restored integration keys without changing remote content.
+			const authenticated = await this.makeRequest('/posts/?limit=1&fields=id');
+			if (authenticated.status !== 200) {
+				console.error('Ghost authenticated connection test failed:', authenticated.status, authenticated.text);
+				return null;
+			}
+
 			const response = await this.makeRequest('/site/');
 
 			if (response.status === 200) {
