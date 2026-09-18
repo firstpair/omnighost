@@ -4657,8 +4657,11 @@ ${line}`;
     block.text = block.text.replace(/\n+$/, "");
   return blocks;
 }
+function sourceSlugKey(prefix) {
+  return `${prefix}${SOURCE_KEY_PREFIX}slug`;
+}
 function packOwnedKeys(prefix, pack) {
-  const owned = /* @__PURE__ */ new Set(["title", `${prefix}slug`]);
+  const owned = /* @__PURE__ */ new Set(["title"]);
   if (pack.hasTags)
     owned.add(`${prefix}tags`);
   if (pack.hasExcerpt)
@@ -4707,6 +4710,13 @@ function updateAssetFolderName(existingAssetPaths, slug) {
 function staleAssetPaths(existingAssetPaths, currentAssetPaths) {
   const current = new Set(currentAssetPaths);
   return existingAssetPaths.filter((path) => !current.has(path));
+}
+function matchTextpackNote(frontmatter, prefix, packSlug) {
+  if (frontmatter[sourceSlugKey(prefix)] === packSlug)
+    return "source-slug";
+  if (frontmatter[`${prefix}slug`] === packSlug)
+    return "slug";
+  return "none";
 }
 
 // main.ts
@@ -6151,7 +6161,10 @@ ${bodyMarkdown}`;
     let content = addGhostPropertiesToContent(markdown, this.settings);
     const upserts = {
       [`${prefix}blog`]: this.blogPropertyYaml([blog]),
-      [`${prefix}slug`]: this.textpackSlug(pack)
+      [`${prefix}slug`]: this.textpackSlug(pack),
+      // The pack's own slug, kept apart from the publishing slug so a later
+      // pack still finds this note after the writer changes its address.
+      [sourceSlugKey(prefix)]: this.textpackSlug(pack)
     };
     if (pack.ghost.tags && pack.ghost.tags.length > 0) {
       upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
@@ -6221,17 +6234,31 @@ ${bodyMarkdown}`;
       new import_obsidian12.Notice(pack.provenanceWarning);
   }
   /**
-   * Notes a pack would update: every unarchived note whose explicit slug is the
-   * pack's. A multi-blog post is one note, so its folder need not be the pack's blog.
+   * Notes a pack could update, best match first: those whose last pack had this
+   * slug, then those publishing under it, then every other note in a blog folder
+   * for a manual choice. A multi-blog post is one note, so its folder need not
+   * be the pack's blog. Archived notes are never offered.
    */
-  textpackUpdateTargets(pack) {
+  textpackUpdateCandidates(pack) {
+    var _a;
     const prefix = this.settings.yamlPrefix;
     const slug = this.textpackSlug(pack);
-    return this.app.vault.getMarkdownFiles().filter((file) => {
-      var _a;
+    const rank = { "source-slug": 0, slug: 1, none: 2 };
+    const candidates = [];
+    for (const file of this.app.vault.getMarkdownFiles()) {
       const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
-      return !!frontmatter && frontmatter[`${prefix}slug`] === slug && !frontmatter[`${prefix}archived`];
-    });
+      if (!frontmatter || frontmatter[`${prefix}archived`])
+        continue;
+      const match = matchTextpackNote(frontmatter, prefix, slug);
+      if (match === "none" && !this.blogForPath(file.path))
+        continue;
+      candidates.push({ file, match });
+    }
+    return candidates.sort((a, b) => rank[a.match] - rank[b.match] || b.file.stat.mtime - a.file.stat.mtime);
+  }
+  /** The notes a pack matches on its own, without a manual choice. */
+  textpackUpdateTargets(pack) {
+    return this.textpackUpdateCandidates(pack).filter((candidate) => candidate.match !== "none").map((candidate) => candidate.file);
   }
   /**
    * Whether `file` still is what its last textpack import wrote: `untouched`
@@ -6265,10 +6292,10 @@ ${bodyMarkdown}`;
     return result.kind === "invalid" ? "edited" : "foreign";
   }
   /**
-   * Replace what a newer pack owns in `file` — body, title, slug, tags, excerpt,
-   * images and source version — and keep everything else the note holds: its
+   * Replace what a newer pack owns in `file` — body, title, tags, excerpt, images
+   * and source version — and keep everything else the note holds: its slug,
    * blogs, per-blog Ghost ids and URLs, publish switches and display settings.
-   * The next sync therefore updates the same post on every blog.
+   * The next sync therefore updates the same post, at the same address, on every blog.
    */
   async updateNoteFromTextpack(file, pack, titleOptions) {
     var _a, _b, _c;
@@ -7374,9 +7401,9 @@ var TextpackMatchModal = class extends import_obsidian12.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "This textpack matches an existing note" });
-    contentEl.createEl("p", { text: `${this.target.path} has the same slug. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
+    contentEl.createEl("p", { text: `${this.target.path} belongs to this pack. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
     contentEl.createEl("p", {
-      text: "Updating keeps the note's blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post."
+      text: "Updating keeps the note's slug, blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post."
     });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian12.ButtonComponent(row).setButtonText("Update existing note").setCta().onClick(() => this.finish("update"));
@@ -7394,6 +7421,7 @@ var UpdateFromTextpackModal = class extends import_obsidian12.Modal {
     this.plugin = plugin;
     this.parsed = null;
     this.targets = [];
+    this.matched = 0;
     this.targetSelect = null;
     this.stateEl = null;
   }
@@ -7405,20 +7433,24 @@ var UpdateFromTextpackModal = class extends import_obsidian12.Modal {
     })) != null ? _a : null;
   }
   async describeTarget() {
+    var _a, _b;
     const target = this.selectedTarget();
     if (!this.stateEl)
       return;
     if (!target) {
-      this.stateEl.setText(this.parsed ? `No note has this pack's slug. Use "Import textpack" to create one.` : "");
+      this.stateEl.setText(this.parsed ? 'No note matches this pack by slug. Choose the note it belongs to, or use "Import textpack" to create one.' : "");
       return;
     }
-    this.stateEl.setText(TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]);
+    const frontmatter = (_b = (_a = this.app.metadataCache.getFileCache(target)) == null ? void 0 : _a.frontmatter) != null ? _b : {};
+    const slug = frontmatter[`${this.plugin.settings.yamlPrefix}slug`];
+    const address = typeof slug === "string" && slug ? ` It keeps its slug "${slug}", so its posts stay at the same address.` : "";
+    this.stateEl.setText(`${TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]}${address}`);
   }
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h3", { text: "Update note from textpack" });
     contentEl.createEl("p", {
-      text: "Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note's; the note keeps its blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones."
+      text: "Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note's; the note keeps its slug, blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones."
     });
     const status = contentEl.createEl("p", { text: "No file selected." });
     const input = contentEl.createEl("input", {
@@ -7439,15 +7471,22 @@ var UpdateFromTextpackModal = class extends import_obsidian12.Modal {
           return;
         try {
           this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
-          this.targets = this.plugin.textpackUpdateTargets(this.parsed);
+          const candidates = this.plugin.textpackUpdateCandidates(this.parsed);
+          this.targets = candidates.map((candidate) => candidate.file);
+          this.matched = candidates.filter((candidate) => candidate.match !== "none").length;
           this.targetSelect.empty();
-          for (const file of this.targets) {
-            this.targetSelect.createEl("option", { text: file.path, attr: { value: file.path } });
+          if (this.matched === 0) {
+            this.targetSelect.createEl("option", { text: "Choose a note\u2026", attr: { value: "" } });
+          }
+          for (const { file, match } of candidates) {
+            const label = match === "none" ? file.path : `${file.path} (matches this pack)`;
+            this.targetSelect.createEl("option", { text: label, attr: { value: file.path } });
           }
           status.setText(`"${this.parsed.name}" \u2014 ${this.parsed.assets.size} image(s), slug: ${(_b = this.parsed.ghost.slug) != null ? _b : this.parsed.name}`);
         } catch (e) {
           this.parsed = null;
           this.targets = [];
+          this.matched = 0;
           this.targetSelect.empty();
           status.setText(`Could not read file: ${e.message}`);
         }
@@ -7463,7 +7502,7 @@ var UpdateFromTextpackModal = class extends import_obsidian12.Modal {
           return;
         }
         if (!target) {
-          new import_obsidian12.Notice("No note has this pack's slug");
+          new import_obsidian12.Notice("Choose the note to update");
           return;
         }
         this.close();

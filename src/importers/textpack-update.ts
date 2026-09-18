@@ -1,8 +1,8 @@
 /**
  * Updating a note that a textpack created, from a newer textpack.
  *
- * A textpack carries what the author wrote: body, title, slug, tags, excerpt,
- * images and the source version. It knows nothing about where a note has since
+ * A textpack carries what the author wrote: body, title, tags, excerpt, images
+ * and the source version. It knows nothing about where a note has since
  * been published. The note does: its blog list, per-blog Ghost ids and URLs,
  * publish and schedule switches, access, cover and provenance display settings,
  * and whatever properties the writer added by hand. An update therefore keeps
@@ -38,15 +38,25 @@ export function frontmatterBlocks(raw: string): FrontmatterBlock[] {
 	return blocks;
 }
 
+/** Frontmatter key recording the slug a note's pack was built with. */
+export function sourceSlugKey(prefix: string): string {
+	return `${prefix}${SOURCE_KEY_PREFIX}slug`;
+}
+
 /**
  * Frontmatter keys an updated pack replaces. Tags and excerpt are optional in a
  * pack; when it carries none, the note's own stay.
+ *
+ * The slug is not among them. It is the address of a post that may already be
+ * public, and a writer may have chosen a different one than the pack proposed;
+ * replacing it would move the live URL. A note keeps its slug, and the pack's
+ * own is recorded under `source_slug` so a later pack still finds the note.
  */
 export function packOwnedKeys(
 	prefix: string,
 	pack: { hasTags: boolean; hasExcerpt: boolean }
 ): (key: string) => boolean {
-	const owned = new Set<string>(['title', `${prefix}slug`]);
+	const owned = new Set<string>(['title']);
 	if (pack.hasTags) owned.add(`${prefix}tags`);
 	if (pack.hasExcerpt) owned.add(`${prefix}excerpt`);
 	return (key: string) => owned.has(key) || key.startsWith(`${prefix}${SOURCE_KEY_PREFIX}`);
@@ -114,4 +124,23 @@ export function updateAssetFolderName(existingAssetPaths: string[], slug: string
 export function staleAssetPaths(existingAssetPaths: string[], currentAssetPaths: string[]): string[] {
 	const current = new Set(currentAssetPaths);
 	return existingAssetPaths.filter(path => !current.has(path));
+}
+
+/** How well a note matches a pack, best first; `none` notes are offered last, for a manual choice. */
+export type TextpackMatch = 'source-slug' | 'slug' | 'none';
+
+/**
+ * Match a note to a pack by the slug its last pack was built with, else by its
+ * publishing slug. A note whose writer changed the publishing slug still
+ * matches through the first once it has been imported or updated by a version
+ * that records it.
+ */
+export function matchTextpackNote(
+	frontmatter: Record<string, unknown>,
+	prefix: string,
+	packSlug: string
+): TextpackMatch {
+	if (frontmatter[sourceSlugKey(prefix)] === packSlug) return 'source-slug';
+	if (frontmatter[`${prefix}slug`] === packSlug) return 'slug';
+	return 'none';
 }

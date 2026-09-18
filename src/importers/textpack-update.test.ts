@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
 	frontmatterBlocks,
+	matchTextpackNote,
 	mergeTextpackUpdate,
 	packOwnedKeys,
 	staleAssetPaths,
@@ -19,7 +20,7 @@ g_blog:
 g_id_querygraph_ai: 66aa
 g_id_adversari_al: 77bb
 g_url_querygraph_ai: https://querygraph.ai/ghost/#/editor/post/66aa
-g_slug: graph-stores-under-strain
+g_slug: rust-graph-wins
 g_tags: ["graphs", "old"]
 g_excerpt: "Old excerpt"
 g_post_access: members
@@ -45,6 +46,7 @@ g_slug: graph-stores-under-strain
 g_tags: ["graphs", "benchmarks"]
 g_excerpt: "New excerpt"
 g_source_kind: textpack
+g_source_slug: graph-stores-under-strain
 g_source_payload_sha256: cccc
 ---
 New body.
@@ -119,4 +121,18 @@ void test('images stay in the folder the note already uses', () => {
 		staleAssetPaths(['assets/s/old.png', 'assets/s/cover.png'], ['assets/s/cover.png', 'assets/s/new.png']),
 		['assets/s/old.png']
 	);
+});
+
+void test('a note keeps its own slug, so a live URL never moves', () => {
+	const merged = mergeTextpackUpdate(EXISTING, FRESH, owned);
+	assert.ok(merged.includes('g_slug: rust-graph-wins'));
+	assert.ok(!merged.includes('g_slug: graph-stores-under-strain'));
+	assert.ok(merged.includes('g_source_slug: graph-stores-under-strain'), 'the pack\'s slug is recorded for the next update');
+});
+
+void test('a pack finds its note by recorded source slug, then by publishing slug', () => {
+	const pack = 'graph-stores-under-strain';
+	assert.equal(matchTextpackNote({ g_slug: 'rust-graph-wins', g_source_slug: pack }, 'g_', pack), 'source-slug');
+	assert.equal(matchTextpackNote({ g_slug: pack }, 'g_', pack), 'slug');
+	assert.equal(matchTextpackNote({ g_slug: 'rust-graph-wins' }, 'g_', pack), 'none');
 });
