@@ -3799,6 +3799,10 @@ function importedTextpackSnapshotField(prefix, digest) {
     throw new Error("Imported textpack snapshot must be a SHA-256 digest");
   return { [`${prefix}${SOURCE_SNAPSHOT_SHA_SUFFIX}`]: normalized };
 }
+function importedTextpackAssetPaths(frontmatter, prefix) {
+  var _a;
+  return ((_a = parseImportedAssets(frontmatter[`${prefix}${SOURCE_ASSETS_SUFFIX}`])) != null ? _a : []).map((asset) => asset.path);
+}
 async function validateInheritedTextpackSource(content, frontmatter, prefix, readAsset) {
   const value = (suffix) => frontmatter[`${prefix}${suffix}`];
   if (value(SOURCE_KIND_SUFFIX) !== "textpack")
@@ -4636,6 +4640,75 @@ async function ensureNoteVersioned(app, file, expectedSource) {
   return withRepositoryLock(repositoryRoot, () => ensureVersionInRepository(context, app, file, expectedSource));
 }
 
+// src/importers/textpack-update.ts
+var SOURCE_KEY_PREFIX = "source_";
+function frontmatterBlocks(raw) {
+  const blocks = [];
+  for (const line of raw.split("\n")) {
+    const top = /^([^\s#:][^:]*):/.exec(line);
+    if (top) {
+      blocks.push({ key: top[1].trim(), text: line });
+    } else if (blocks.length > 0) {
+      blocks[blocks.length - 1].text += `
+${line}`;
+    }
+  }
+  for (const block of blocks)
+    block.text = block.text.replace(/\n+$/, "");
+  return blocks;
+}
+function packOwnedKeys(prefix, pack) {
+  const owned = /* @__PURE__ */ new Set(["title", `${prefix}slug`]);
+  if (pack.hasTags)
+    owned.add(`${prefix}tags`);
+  if (pack.hasExcerpt)
+    owned.add(`${prefix}excerpt`);
+  return (key) => owned.has(key) || key.startsWith(`${prefix}${SOURCE_KEY_PREFIX}`);
+}
+function mergeTextpackUpdate(existing, fresh, isPackOwned) {
+  const freshParts = splitFrontmatter(fresh);
+  if (!freshParts)
+    throw new Error("A rendered textpack import always has frontmatter");
+  const existingParts = splitFrontmatter(existing);
+  if (!existingParts)
+    return fresh;
+  const freshBlocks = frontmatterBlocks(freshParts.raw);
+  const freshByKey = new Map(freshBlocks.map((block) => [block.key, block]));
+  const merged = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const block of frontmatterBlocks(existingParts.raw)) {
+    if (seen.has(block.key))
+      continue;
+    seen.add(block.key);
+    if (isPackOwned(block.key)) {
+      const replacement = freshByKey.get(block.key);
+      if (replacement)
+        merged.push(replacement);
+      continue;
+    }
+    merged.push(block);
+  }
+  for (const block of freshBlocks) {
+    if (!seen.has(block.key)) {
+      seen.add(block.key);
+      merged.push(block);
+    }
+  }
+  return joinFrontmatter(merged.map((block) => block.text).join("\n"), freshParts.body);
+}
+function updateAssetFolderName(existingAssetPaths, slug) {
+  for (const path of existingAssetPaths) {
+    const match = /^assets\/([^/]+)\/[^/]+$/.exec(path);
+    if (match)
+      return match[1];
+  }
+  return slug;
+}
+function staleAssetPaths(existingAssetPaths, currentAssetPaths) {
+  const current = new Set(currentAssetPaths);
+  return existingAssetPaths.filter((path) => !current.has(path));
+}
+
 // main.ts
 var DEV_MODE = false;
 var CODEX_UPDATE_BASE_URL = "https://raw.githubusercontent.com/firstpair/omnighost/main";
@@ -4867,6 +4940,13 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
       name: "Import textpack",
       callback: () => {
         new ImportTextpackModal(this.app, this).open();
+      }
+    });
+    this.addCommand({
+      id: "update-note-from-textpack",
+      name: "Update note from textpack",
+      callback: () => {
+        new UpdateFromTextpackModal(this.app, this).open();
       }
     });
     this.addCommand({
@@ -6028,16 +6108,84 @@ ${bodyMarkdown}`;
   /** Import a parsed .textpack as a new note in `blog`'s folder: write its
    *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
    *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
-  async importTextpack(pack, blog, titleOptions) {
+  textpackSlug(pack) {
+    return (pack.ghost.slug || pack.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "post";
+  }
+  /**
+   * Write a pack's images into `assetDir` and render its note: frontmatter with
+   * Ghost properties, blog, slug, tags, excerpt and source fields, and the body
+   * with image references scoped to `assetFolderName`. The snapshot field is not
+   * added here, because an update merges the note's own properties in first.
+   */
+  async renderTextpackNote(pack, blog, titleOptions, assetFolderName, assetDir) {
     const prefix = this.settings.yamlPrefix;
-    const slug = (pack.ghost.slug || pack.name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "post";
-    const folder = (0, import_obsidian12.normalizePath)(blog.folder || this.settings.syncFolder);
     const titleAnalysis = analyzeTextpackTitle(pack);
     const normalizedTitle = normalizeTextpackTitle(pack, titleOptions != null ? titleOptions : {
       primarySource: titleAnalysis.defaultSource,
       updateSecondary: true
     });
-    const title = normalizedTitle.title;
+    let markdown = normalizedTitle.markdown;
+    const importedAssets = [];
+    if (pack.assets.size > 0) {
+      try {
+        await this.app.vault.createFolder(assetDir);
+      } catch (e) {
+      }
+      for (const [base, data] of pack.assets) {
+        const path = (0, import_obsidian12.normalizePath)(`${assetDir}/${base}`);
+        const buf = data.slice().buffer;
+        const existing = this.app.vault.getAbstractFileByPath(path);
+        if (existing instanceof import_obsidian12.TFile)
+          await this.app.vault.modifyBinary(existing, buf);
+        else
+          await this.app.vault.createBinary(path, buf);
+        if (pack.sourceVersion) {
+          importedAssets.push({
+            path: `assets/${assetFolderName}/${base}`,
+            sha256: await sha256Bytes(data)
+          });
+        }
+      }
+      markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${assetFolderName}/`);
+    }
+    let content = addGhostPropertiesToContent(markdown, this.settings);
+    const upserts = {
+      [`${prefix}blog`]: this.blogPropertyYaml([blog]),
+      [`${prefix}slug`]: this.textpackSlug(pack)
+    };
+    if (pack.ghost.tags && pack.ghost.tags.length > 0) {
+      upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
+    }
+    if (pack.ghost.excerpt)
+      upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
+    if (pack.sourceVersion) {
+      Object.assign(upserts, importedTextpackSourceFields(prefix, pack.sourceVersion, importedAssets));
+    }
+    content = upsertFrontmatterKeys(content, upserts);
+    return { title: normalizedTitle.title, content };
+  }
+  /** Fingerprint the authorial state of a textpack note so an untouched note inherits the pack's version. */
+  async withTextpackSnapshot(content) {
+    const prefix = this.settings.yamlPrefix;
+    const parsed = splitFrontmatter(content);
+    const parsedFrontmatter = parsed ? (0, import_obsidian12.parseYaml)(parsed.raw) : null;
+    if (!parsedFrontmatter || typeof parsedFrontmatter !== "object" || Array.isArray(parsedFrontmatter)) {
+      throw new Error("Could not create textpack source fingerprint");
+    }
+    const snapshot = await hashImportedTextpackSnapshot(
+      content,
+      parsedFrontmatter,
+      prefix
+    );
+    return upsertFrontmatterKeys(content, importedTextpackSnapshotField(prefix, snapshot));
+  }
+  async importTextpack(pack, blog, titleOptions) {
+    const slug = this.textpackSlug(pack);
+    const folder = (0, import_obsidian12.normalizePath)(blog.folder || this.settings.syncFolder);
+    const title = normalizeTextpackTitle(pack, titleOptions != null ? titleOptions : {
+      primarySource: analyzeTextpackTitle(pack).defaultSource,
+      updateSecondary: true
+    }).title;
     const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, "").trim() || slug;
     if (!this.app.vault.getAbstractFileByPath(folder)) {
       try {
@@ -6062,57 +6210,95 @@ ${bodyMarkdown}`;
       collisionNumber++;
       importSuffix = collisionNumber === 1 ? collisionBase : `${collisionBase}-${collisionNumber}`;
     }
-    let markdown = normalizedTitle.markdown;
-    const importedAssets = [];
-    if (pack.assets.size > 0) {
-      try {
-        await this.app.vault.createFolder(assetDir);
-      } catch (e) {
-      }
-      for (const [base, data] of pack.assets) {
-        const path = (0, import_obsidian12.normalizePath)(`${assetDir}/${base}`);
-        const buf = data.slice().buffer;
-        await this.app.vault.createBinary(path, buf);
-        if (pack.sourceVersion) {
-          importedAssets.push({
-            path: `assets/${assetFolderName}/${base}`,
-            sha256: await sha256Bytes(data)
-          });
-        }
-      }
-      markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${assetFolderName}/`);
-    }
-    let content = addGhostPropertiesToContent(markdown, this.settings);
-    const upserts = {
-      [`${prefix}blog`]: this.blogPropertyYaml([blog]),
-      [`${prefix}slug`]: slug
-    };
-    if (pack.ghost.tags && pack.ghost.tags.length > 0) {
-      upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
-    }
-    if (pack.ghost.excerpt)
-      upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
-    if (pack.sourceVersion) {
-      Object.assign(upserts, importedTextpackSourceFields(prefix, pack.sourceVersion, importedAssets));
-    }
-    content = upsertFrontmatterKeys(content, upserts);
-    if (pack.sourceVersion) {
-      const parsed = splitFrontmatter(content);
-      const parsedFrontmatter = parsed ? (0, import_obsidian12.parseYaml)(parsed.raw) : null;
-      if (!parsedFrontmatter || typeof parsedFrontmatter !== "object" || Array.isArray(parsedFrontmatter)) {
-        throw new Error("Could not create textpack source fingerprint");
-      }
-      const snapshot = await hashImportedTextpackSnapshot(
-        content,
-        parsedFrontmatter,
-        prefix
-      );
-      content = upsertFrontmatterKeys(content, importedTextpackSnapshotField(prefix, snapshot));
-    }
+    let { content } = await this.renderTextpackNote(pack, blog, titleOptions, assetFolderName, assetDir);
+    if (pack.sourceVersion)
+      content = await this.withTextpackSnapshot(content);
     const file = await this.app.vault.create(notePath, content);
     await this.app.workspace.getLeaf(false).openFile(file);
     const imgs = pack.assets.size;
     new import_obsidian12.Notice(`Imported "${title}" \u2192 ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? "" : "s"})` : ""}`);
+    if (pack.provenanceWarning)
+      new import_obsidian12.Notice(pack.provenanceWarning);
+  }
+  /**
+   * Notes a pack would update: every unarchived note whose explicit slug is the
+   * pack's. A multi-blog post is one note, so its folder need not be the pack's blog.
+   */
+  textpackUpdateTargets(pack) {
+    const prefix = this.settings.yamlPrefix;
+    const slug = this.textpackSlug(pack);
+    return this.app.vault.getMarkdownFiles().filter((file) => {
+      var _a;
+      const frontmatter = (_a = this.app.metadataCache.getFileCache(file)) == null ? void 0 : _a.frontmatter;
+      return !!frontmatter && frontmatter[`${prefix}slug`] === slug && !frontmatter[`${prefix}archived`];
+    });
+  }
+  /**
+   * Whether `file` still is what its last textpack import wrote: `untouched`
+   * notes update without loss; `edited` ones hold local changes the update
+   * would replace; `foreign` ones never came from a textpack.
+   */
+  async textpackUpdateState(file) {
+    var _a, _b;
+    const prefix = this.settings.yamlPrefix;
+    const content = await this.app.vault.read(file);
+    const parsed = splitFrontmatter(content);
+    const frontmatter = parsed ? (0, import_obsidian12.parseYaml)(parsed.raw) : null;
+    if (!frontmatter || typeof frontmatter !== "object" || Array.isArray(frontmatter))
+      return "foreign";
+    const parent = (_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : "";
+    const result = await validateInheritedTextpackSource(
+      content,
+      frontmatter,
+      prefix,
+      async (relativePath) => {
+        const asset = this.app.vault.getAbstractFileByPath(
+          (0, import_obsidian12.normalizePath)(parent ? `${parent}/${relativePath}` : relativePath)
+        );
+        if (!(asset instanceof import_obsidian12.TFile))
+          return null;
+        return new Uint8Array(await this.app.vault.readBinary(asset));
+      }
+    );
+    if (result.kind === "valid")
+      return "untouched";
+    return result.kind === "invalid" ? "edited" : "foreign";
+  }
+  /**
+   * Replace what a newer pack owns in `file` — body, title, slug, tags, excerpt,
+   * images and source version — and keep everything else the note holds: its
+   * blogs, per-blog Ghost ids and URLs, publish switches and display settings.
+   * The next sync therefore updates the same post on every blog.
+   */
+  async updateNoteFromTextpack(file, pack, titleOptions) {
+    var _a, _b, _c;
+    const prefix = this.settings.yamlPrefix;
+    const existing = await this.app.vault.read(file);
+    const existingParts = splitFrontmatter(existing);
+    const existingFrontmatter = existingParts ? (0, import_obsidian12.parseYaml)(existingParts.raw) : null;
+    const previousAssets = existingFrontmatter && typeof existingFrontmatter === "object" && !Array.isArray(existingFrontmatter) ? importedTextpackAssetPaths(existingFrontmatter, prefix) : [];
+    const parent = (_b = (_a = file.parent) == null ? void 0 : _a.path) != null ? _b : "";
+    const assetFolderName = updateAssetFolderName(previousAssets, this.textpackSlug(pack));
+    const assetDir = (0, import_obsidian12.normalizePath)(`${parent ? `${parent}/` : ""}assets/${assetFolderName}`);
+    const blog = (_c = this.resolveBlogsForFile(file)[0]) != null ? _c : this.defaultBlog();
+    if (!blog)
+      throw new Error("No blog is configured");
+    const rendered = await this.renderTextpackNote(pack, blog, titleOptions, assetFolderName, assetDir);
+    let content = mergeTextpackUpdate(existing, rendered.content, packOwnedKeys(prefix, {
+      hasTags: !!pack.ghost.tags && pack.ghost.tags.length > 0,
+      hasExcerpt: !!pack.ghost.excerpt
+    }));
+    if (pack.sourceVersion)
+      content = await this.withTextpackSnapshot(content);
+    await this.app.vault.modify(file, content);
+    const currentAssets = [...pack.assets.keys()].map((base) => `assets/${assetFolderName}/${base}`);
+    for (const stale of staleAssetPaths(previousAssets, currentAssets)) {
+      const asset = this.app.vault.getAbstractFileByPath((0, import_obsidian12.normalizePath)(parent ? `${parent}/${stale}` : stale));
+      if (asset instanceof import_obsidian12.TFile)
+        await this.app.fileManager.trashFile(asset);
+    }
+    await this.app.workspace.getLeaf(false).openFile(file);
+    new import_obsidian12.Notice(`Updated "${file.basename}" from textpack. Sync to update its posts.`);
     if (pack.provenanceWarning)
       new import_obsidian12.Notice(pack.provenanceWarning);
   }
@@ -6131,6 +6317,21 @@ ${bodyMarkdown}`;
       if (!blog) {
         new import_obsidian12.Notice(`Found ${file.name} but no blog is configured \u2014 add one in settings.`);
         return false;
+      }
+      const targets = this.textpackUpdateTargets(pack);
+      if (targets.length === 1) {
+        const target = targets[0];
+        const state = await this.textpackUpdateState(target);
+        const choice = await new Promise((resolve) => {
+          new TextpackMatchModal(this.app, target, state, resolve).open();
+        });
+        if (choice === "cancel")
+          return false;
+        if (choice === "update") {
+          await this.updateNoteFromTextpack(target, pack);
+          await this.app.fileManager.trashFile(file);
+          return true;
+        }
       }
       await this.importTextpack(pack, blog);
       await this.app.fileManager.trashFile(file);
@@ -7148,6 +7349,135 @@ var SimpleConfirmModal = class extends import_obsidian12.Modal {
     this.contentEl.empty();
     if (!this.decided)
       this.onResult(false);
+  }
+};
+var TEXTPACK_UPDATE_STATE_TEXT = {
+  untouched: "Unchanged since its last textpack import, so nothing of yours is replaced.",
+  edited: "Edited since its last textpack import. Updating replaces its body, title, tags and excerpt with the pack's.",
+  foreign: "Not created from a textpack. Updating replaces its body, title, tags and excerpt with the pack's."
+};
+var TextpackMatchModal = class extends import_obsidian12.Modal {
+  constructor(app, target, state, resolve) {
+    super(app);
+    this.target = target;
+    this.state = state;
+    this.resolve = resolve;
+    this.resolved = false;
+  }
+  finish(choice) {
+    if (this.resolved)
+      return;
+    this.resolved = true;
+    this.resolve(choice);
+    this.close();
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "This textpack matches an existing note" });
+    contentEl.createEl("p", { text: `${this.target.path} has the same slug. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
+    contentEl.createEl("p", {
+      text: "Updating keeps the note's blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post."
+    });
+    const row = contentEl.createDiv({ cls: "modal-button-container" });
+    new import_obsidian12.ButtonComponent(row).setButtonText("Update existing note").setCta().onClick(() => this.finish("update"));
+    new import_obsidian12.ButtonComponent(row).setButtonText("Import as new").onClick(() => this.finish("import"));
+    new import_obsidian12.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.finish("cancel"));
+  }
+  onClose() {
+    this.contentEl.empty();
+    this.finish("cancel");
+  }
+};
+var UpdateFromTextpackModal = class extends import_obsidian12.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.parsed = null;
+    this.targets = [];
+    this.targetSelect = null;
+    this.stateEl = null;
+  }
+  selectedTarget() {
+    var _a;
+    return (_a = this.targets.find((file) => {
+      var _a2;
+      return file.path === ((_a2 = this.targetSelect) == null ? void 0 : _a2.value);
+    })) != null ? _a : null;
+  }
+  async describeTarget() {
+    const target = this.selectedTarget();
+    if (!this.stateEl)
+      return;
+    if (!target) {
+      this.stateEl.setText(this.parsed ? `No note has this pack's slug. Use "Import textpack" to create one.` : "");
+      return;
+    }
+    this.stateEl.setText(TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]);
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: "Update note from textpack" });
+    contentEl.createEl("p", {
+      text: "Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note's; the note keeps its blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones."
+    });
+    const status = contentEl.createEl("p", { text: "No file selected." });
+    const input = contentEl.createEl("input", {
+      attr: { type: "file", "aria-label": "Textpack file" }
+    });
+    new import_obsidian12.Setting(contentEl).setName("Note to update").addDropdown((d) => {
+      this.targetSelect = d.selectEl;
+      d.onChange(() => {
+        void this.describeTarget();
+      });
+    });
+    this.stateEl = contentEl.createEl("p", { text: "" });
+    input.addEventListener("change", () => {
+      void (async () => {
+        var _a, _b;
+        const f = (_a = input.files) == null ? void 0 : _a[0];
+        if (!f || !this.targetSelect)
+          return;
+        try {
+          this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
+          this.targets = this.plugin.textpackUpdateTargets(this.parsed);
+          this.targetSelect.empty();
+          for (const file of this.targets) {
+            this.targetSelect.createEl("option", { text: file.path, attr: { value: file.path } });
+          }
+          status.setText(`"${this.parsed.name}" \u2014 ${this.parsed.assets.size} image(s), slug: ${(_b = this.parsed.ghost.slug) != null ? _b : this.parsed.name}`);
+        } catch (e) {
+          this.parsed = null;
+          this.targets = [];
+          this.targetSelect.empty();
+          status.setText(`Could not read file: ${e.message}`);
+        }
+        await this.describeTarget();
+      })();
+    });
+    const row = contentEl.createDiv({ cls: "modal-button-container" });
+    new import_obsidian12.ButtonComponent(row).setButtonText("Update note").setCta().onClick(() => {
+      void (async () => {
+        const target = this.selectedTarget();
+        if (!this.parsed) {
+          new import_obsidian12.Notice("Choose a .textpack file first");
+          return;
+        }
+        if (!target) {
+          new import_obsidian12.Notice("No note has this pack's slug");
+          return;
+        }
+        this.close();
+        try {
+          await this.plugin.updateNoteFromTextpack(target, this.parsed);
+        } catch (e) {
+          new import_obsidian12.Notice(`Update failed: ${e.message}`);
+        }
+      })();
+    });
+    new import_obsidian12.ButtonComponent(row).setButtonText("Cancel").onClick(() => this.close());
+  }
+  onClose() {
+    this.contentEl.empty();
   }
 };
 var ImportTextpackModal = class extends import_obsidian12.Modal {
