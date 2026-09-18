@@ -159,6 +159,14 @@ For one-note exclusions, set `ghost_no_sync: true` / `g_no_sync: true`. For fold
 
 Run **Import textpack** or save a `.textpack` inside the vault for automatic import. Markdown, local images, blog, slug, title, tags, and excerpt travel together. Packs made by `scripts/textpack.py` also carry validated Git/payload provenance as described above, so an untouched source version survives a desktop-to-mobile import and publish cycle.
 
+### Updating a note from a newer textpack
+
+Importing a pack never overwrites a note: a second pack of the same post lands beside the first as a timestamped copy. That copy carries the pack's slug, so publishing it updates the existing Ghost post rather than duplicating it, but it knows only the one blog the pack names, and the original note, which still holds the Ghost ids, can sync its old body back later.
+
+Run **Update note from textpack** instead. Choose the newer pack; Omnighost finds the note with the same explicit slug and tells you whether it is unchanged since its last import, edited since, or was never imported from a textpack. Updating replaces what the pack owns — body, title, slug, tags, excerpt, images and source version — and keeps what only the note knows: its blog list, per-blog Ghost ids and URLs, publish and schedule switches, access, cover and provenance display settings, and any properties you added. Sync afterwards and every blog's post updates in place. A pack without tags or an excerpt leaves the note's own.
+
+Saving a `.textpack` into the vault does the same when exactly one note has its slug: it asks whether to update that note or import a copy.
+
 ### Importing from Ghost
 
 - **Import post from ghost** imports one existing Ghost post by editor URL and writes it into the matching blog folder.

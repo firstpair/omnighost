@@ -127,6 +127,11 @@ export function importedTextpackSnapshotField(prefix: string, digest: string): R
 	return { [`${prefix}${SOURCE_SNAPSHOT_SHA_SUFFIX}`]: normalized };
 }
 
+/** Note-relative paths of the assets a note's last textpack import wrote. */
+export function importedTextpackAssetPaths(frontmatter: Record<string, unknown>, prefix: string): string[] {
+	return (parseImportedAssets(frontmatter[`${prefix}${SOURCE_ASSETS_SUFFIX}`]) ?? []).map(asset => asset.path);
+}
+
 /** Validate persisted source metadata, note state, and every imported asset byte. */
 export async function validateInheritedTextpackSource(
 	content: string,

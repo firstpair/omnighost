@@ -24,8 +24,15 @@ import {
 	importedTextpackSnapshotField,
 	importedTextpackSourceFields,
 	sha256Bytes,
+	importedTextpackAssetPaths,
 	validateInheritedTextpackSource
 } from './src/versioning/textpack-source';
+import {
+	mergeTextpackUpdate,
+	packOwnedKeys,
+	staleAssetPaths,
+	updateAssetFolderName
+} from './src/importers/textpack-update';
 import type { ImportedTextpackAsset } from './src/versioning/textpack-source';
 
 // ⚠️ IMPORTANT: Set to false before production build/release
@@ -333,6 +340,13 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			id: 'import-textpack',
 			name: 'Import textpack',
 			callback: () => { new ImportTextpackModal(this.app, this).open(); }
+		});
+
+		// Update the note a newer .textpack belongs to, keeping its blogs and Ghost links
+		this.addCommand({
+			id: 'update-note-from-textpack',
+			name: 'Update note from textpack',
+			callback: () => { new UpdateFromTextpackModal(this.app, this).open(); }
 		});
 
 		// Import every .textpack file currently sitting in the vault
@@ -1535,17 +1549,92 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	/** Import a parsed .textpack as a new note in `blog`'s folder: write its
 	 *  images under assets/<slug>/, rewrite the refs, add Ghost frontmatter
 	 *  (blog, slug, tags, excerpt from the bundle's metadata), open the note. */
-	async importTextpack(pack: ParsedTextpack, blog: GhostBlog, titleOptions?: TextpackTitleOptions): Promise<void> {
-		const prefix = this.settings.yamlPrefix;
-		const slug = (pack.ghost.slug || pack.name).toLowerCase()
+	private textpackSlug(pack: ParsedTextpack): string {
+		return (pack.ghost.slug || pack.name).toLowerCase()
 			.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'post';
-		const folder = normalizePath(blog.folder || this.settings.syncFolder);
+	}
+
+	/**
+	 * Write a pack's images into `assetDir` and render its note: frontmatter with
+	 * Ghost properties, blog, slug, tags, excerpt and source fields, and the body
+	 * with image references scoped to `assetFolderName`. The snapshot field is not
+	 * added here, because an update merges the note's own properties in first.
+	 */
+	private async renderTextpackNote(
+		pack: ParsedTextpack,
+		blog: GhostBlog,
+		titleOptions: TextpackTitleOptions | undefined,
+		assetFolderName: string,
+		assetDir: string
+	): Promise<{ title: string; content: string }> {
+		const prefix = this.settings.yamlPrefix;
 		const titleAnalysis = analyzeTextpackTitle(pack);
 		const normalizedTitle = normalizeTextpackTitle(pack, titleOptions ?? {
 			primarySource: titleAnalysis.defaultSource,
 			updateSecondary: true
 		});
-		const title = normalizedTitle.title;
+
+		let markdown = normalizedTitle.markdown;
+		const importedAssets: ImportedTextpackAsset[] = [];
+		if (pack.assets.size > 0) {
+			try { await this.app.vault.createFolder(assetDir); } catch { /* exists */ }
+			for (const [base, data] of pack.assets) {
+				const path = normalizePath(`${assetDir}/${base}`);
+				const buf = data.slice().buffer;
+				const existing = this.app.vault.getAbstractFileByPath(path);
+				if (existing instanceof TFile) await this.app.vault.modifyBinary(existing, buf);
+				else await this.app.vault.createBinary(path, buf);
+				if (pack.sourceVersion) {
+					importedAssets.push({
+						path: `assets/${assetFolderName}/${base}`,
+						sha256: await sha256Bytes(data)
+					});
+				}
+			}
+			// Bundle refs are assets/<file>; the note lives in the blog folder, so
+			// they resolve note-relatively once scoped by slug: assets/<slug>/<file>.
+			markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${assetFolderName}/`);
+		}
+
+		let content = addGhostPropertiesToContent(markdown, this.settings);
+		const upserts: Record<string, string> = {
+			[`${prefix}blog`]: this.blogPropertyYaml([blog]),
+			[`${prefix}slug`]: this.textpackSlug(pack),
+		};
+		if (pack.ghost.tags && pack.ghost.tags.length > 0) {
+			upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
+		}
+		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
+		if (pack.sourceVersion) {
+			Object.assign(upserts, importedTextpackSourceFields(prefix, pack.sourceVersion, importedAssets));
+		}
+		content = upsertFrontmatterKeys(content, upserts);
+		return { title: normalizedTitle.title, content };
+	}
+
+	/** Fingerprint the authorial state of a textpack note so an untouched note inherits the pack's version. */
+	private async withTextpackSnapshot(content: string): Promise<string> {
+		const prefix = this.settings.yamlPrefix;
+		const parsed = splitFrontmatter(content);
+		const parsedFrontmatter = parsed ? parseYaml(parsed.raw) as unknown : null;
+		if (!parsedFrontmatter || typeof parsedFrontmatter !== 'object' || Array.isArray(parsedFrontmatter)) {
+			throw new Error('Could not create textpack source fingerprint');
+		}
+		const snapshot = await hashImportedTextpackSnapshot(
+			content,
+			parsedFrontmatter as Record<string, unknown>,
+			prefix
+		);
+		return upsertFrontmatterKeys(content, importedTextpackSnapshotField(prefix, snapshot));
+	}
+
+	async importTextpack(pack: ParsedTextpack, blog: GhostBlog, titleOptions?: TextpackTitleOptions): Promise<void> {
+		const slug = this.textpackSlug(pack);
+		const folder = normalizePath(blog.folder || this.settings.syncFolder);
+		const title = normalizeTextpackTitle(pack, titleOptions ?? {
+			primarySource: analyzeTextpackTitle(pack).defaultSource,
+			updateSecondary: true
+		}).title;
 		const fileName = title.replace(/[\\/:*?"<>|#^[\]]/g, '').trim() || slug;
 		if (!this.app.vault.getAbstractFileByPath(folder)) {
 			try { await this.app.vault.createFolder(folder); } catch { /* exists */ }
@@ -1568,57 +1657,97 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			importSuffix = collisionNumber === 1 ? collisionBase : `${collisionBase}-${collisionNumber}`;
 		}
 
-		let markdown = normalizedTitle.markdown;
-		const importedAssets: ImportedTextpackAsset[] = [];
-		if (pack.assets.size > 0) {
-			try { await this.app.vault.createFolder(assetDir); } catch { /* exists */ }
-			for (const [base, data] of pack.assets) {
-				const path = normalizePath(`${assetDir}/${base}`);
-				const buf = data.slice().buffer;
-				await this.app.vault.createBinary(path, buf);
-				if (pack.sourceVersion) {
-					importedAssets.push({
-						path: `assets/${assetFolderName}/${base}`,
-						sha256: await sha256Bytes(data)
-					});
-				}
-			}
-			// Bundle refs are assets/<file>; the note lives in the blog folder, so
-			// they resolve note-relatively once scoped by slug: assets/<slug>/<file>.
-			markdown = markdown.replace(/(!\[[^\]]*\]\()assets\//g, `$1assets/${assetFolderName}/`);
-		}
-
-		let content = addGhostPropertiesToContent(markdown, this.settings);
-		const upserts: Record<string, string> = {
-			[`${prefix}blog`]: this.blogPropertyYaml([blog]),
-			[`${prefix}slug`]: slug,
-		};
-		if (pack.ghost.tags && pack.ghost.tags.length > 0) {
-			upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
-		}
-		if (pack.ghost.excerpt) upserts[`${prefix}excerpt`] = yamlString(pack.ghost.excerpt, true);
-		if (pack.sourceVersion) {
-			Object.assign(upserts, importedTextpackSourceFields(prefix, pack.sourceVersion, importedAssets));
-		}
-		content = upsertFrontmatterKeys(content, upserts);
-		if (pack.sourceVersion) {
-			const parsed = splitFrontmatter(content);
-			const parsedFrontmatter = parsed ? parseYaml(parsed.raw) as unknown : null;
-			if (!parsedFrontmatter || typeof parsedFrontmatter !== 'object' || Array.isArray(parsedFrontmatter)) {
-				throw new Error('Could not create textpack source fingerprint');
-			}
-			const snapshot = await hashImportedTextpackSnapshot(
-				content,
-				parsedFrontmatter as Record<string, unknown>,
-				prefix
-			);
-			content = upsertFrontmatterKeys(content, importedTextpackSnapshotField(prefix, snapshot));
-		}
+		let { content } = await this.renderTextpackNote(pack, blog, titleOptions, assetFolderName, assetDir);
+		if (pack.sourceVersion) content = await this.withTextpackSnapshot(content);
 
 		const file = await this.app.vault.create(notePath, content);
 		await this.app.workspace.getLeaf(false).openFile(file);
 		const imgs = pack.assets.size;
 		new Notice(`Imported "${title}" → ${blog.name}${imgs ? ` (${imgs} image${imgs === 1 ? '' : 's'})` : ''}`);
+		if (pack.provenanceWarning) new Notice(pack.provenanceWarning);
+	}
+
+	/**
+	 * Notes a pack would update: every unarchived note whose explicit slug is the
+	 * pack's. A multi-blog post is one note, so its folder need not be the pack's blog.
+	 */
+	textpackUpdateTargets(pack: ParsedTextpack): TFile[] {
+		const prefix = this.settings.yamlPrefix;
+		const slug = this.textpackSlug(pack);
+		return this.app.vault.getMarkdownFiles().filter((file) => {
+			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
+			return !!frontmatter
+				&& frontmatter[`${prefix}slug`] === slug
+				&& !frontmatter[`${prefix}archived`];
+		});
+	}
+
+	/**
+	 * Whether `file` still is what its last textpack import wrote: `untouched`
+	 * notes update without loss; `edited` ones hold local changes the update
+	 * would replace; `foreign` ones never came from a textpack.
+	 */
+	async textpackUpdateState(file: TFile): Promise<'untouched' | 'edited' | 'foreign'> {
+		const prefix = this.settings.yamlPrefix;
+		const content = await this.app.vault.read(file);
+		const parsed = splitFrontmatter(content);
+		const frontmatter = parsed ? parseYaml(parsed.raw) as unknown : null;
+		if (!frontmatter || typeof frontmatter !== 'object' || Array.isArray(frontmatter)) return 'foreign';
+		const parent = file.parent?.path ?? '';
+		const result = await validateInheritedTextpackSource(
+			content,
+			frontmatter as Record<string, unknown>,
+			prefix,
+			async (relativePath) => {
+				const asset = this.app.vault.getAbstractFileByPath(
+					normalizePath(parent ? `${parent}/${relativePath}` : relativePath)
+				);
+				if (!(asset instanceof TFile)) return null;
+				return new Uint8Array(await this.app.vault.readBinary(asset));
+			}
+		);
+		if (result.kind === 'valid') return 'untouched';
+		return result.kind === 'invalid' ? 'edited' : 'foreign';
+	}
+
+	/**
+	 * Replace what a newer pack owns in `file` — body, title, slug, tags, excerpt,
+	 * images and source version — and keep everything else the note holds: its
+	 * blogs, per-blog Ghost ids and URLs, publish switches and display settings.
+	 * The next sync therefore updates the same post on every blog.
+	 */
+	async updateNoteFromTextpack(file: TFile, pack: ParsedTextpack, titleOptions?: TextpackTitleOptions): Promise<void> {
+		const prefix = this.settings.yamlPrefix;
+		const existing = await this.app.vault.read(file);
+		const existingParts = splitFrontmatter(existing);
+		const existingFrontmatter = existingParts ? parseYaml(existingParts.raw) as unknown : null;
+		const previousAssets = existingFrontmatter && typeof existingFrontmatter === 'object' && !Array.isArray(existingFrontmatter)
+			? importedTextpackAssetPaths(existingFrontmatter as Record<string, unknown>, prefix)
+			: [];
+
+		const parent = file.parent?.path ?? '';
+		const assetFolderName = updateAssetFolderName(previousAssets, this.textpackSlug(pack));
+		const assetDir = normalizePath(`${parent ? `${parent}/` : ''}assets/${assetFolderName}`);
+		// The rendered blog is a placeholder: the note's own blog list replaces it.
+		const blog = this.resolveBlogsForFile(file)[0] ?? this.defaultBlog();
+		if (!blog) throw new Error('No blog is configured');
+
+		const rendered = await this.renderTextpackNote(pack, blog, titleOptions, assetFolderName, assetDir);
+		let content = mergeTextpackUpdate(existing, rendered.content, packOwnedKeys(prefix, {
+			hasTags: !!pack.ghost.tags && pack.ghost.tags.length > 0,
+			hasExcerpt: !!pack.ghost.excerpt
+		}));
+		if (pack.sourceVersion) content = await this.withTextpackSnapshot(content);
+		await this.app.vault.modify(file, content);
+
+		const currentAssets = [...pack.assets.keys()].map(base => `assets/${assetFolderName}/${base}`);
+		for (const stale of staleAssetPaths(previousAssets, currentAssets)) {
+			const asset = this.app.vault.getAbstractFileByPath(normalizePath(parent ? `${parent}/${stale}` : stale));
+			if (asset instanceof TFile) await this.app.fileManager.trashFile(asset);
+		}
+
+		await this.app.workspace.getLeaf(false).openFile(file);
+		new Notice(`Updated "${file.basename}" from textpack. Sync to update its posts.`);
 		if (pack.provenanceWarning) new Notice(pack.provenanceWarning);
 	}
 
@@ -1638,6 +1767,22 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			if (!blog) {
 				new Notice(`Found ${file.name} but no blog is configured — add one in settings.`);
 				return false;
+			}
+			// A pack whose slug a note already holds is an update of that note, not a
+			// second copy of it. Ask, because updating replaces the note's body.
+			const targets = this.textpackUpdateTargets(pack);
+			if (targets.length === 1) {
+				const target = targets[0];
+				const state = await this.textpackUpdateState(target);
+				const choice = await new Promise<'update' | 'import' | 'cancel'>((resolve) => {
+					new TextpackMatchModal(this.app, target, state, resolve).open();
+				});
+				if (choice === 'cancel') return false;
+				if (choice === 'update') {
+					await this.updateNoteFromTextpack(target, pack);
+					await this.app.fileManager.trashFile(file);
+					return true;
+				}
 			}
 			await this.importTextpack(pack, blog);
 			await this.app.fileManager.trashFile(file);
@@ -2662,6 +2807,132 @@ class SimpleConfirmModal extends Modal {
 }
 
 /** Pick a .textpack file and a target blog, then import it as a synced note. */
+const TEXTPACK_UPDATE_STATE_TEXT: Record<'untouched' | 'edited' | 'foreign', string> = {
+	untouched: 'Unchanged since its last textpack import, so nothing of yours is replaced.',
+	edited: 'Edited since its last textpack import. Updating replaces its body, title, tags and excerpt with the pack\'s.',
+	foreign: 'Not created from a textpack. Updating replaces its body, title, tags and excerpt with the pack\'s.'
+};
+
+/** A pack dropped in the vault matches an existing note: update it, import a copy, or stop. */
+class TextpackMatchModal extends Modal {
+	private resolved = false;
+	constructor(
+		app: App,
+		private target: TFile,
+		private state: 'untouched' | 'edited' | 'foreign',
+		private resolve: (choice: 'update' | 'import' | 'cancel') => void
+	) {
+		super(app);
+	}
+	private finish(choice: 'update' | 'import' | 'cancel'): void {
+		if (this.resolved) return;
+		this.resolved = true;
+		this.resolve(choice);
+		this.close();
+	}
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl('h3', { text: 'This textpack matches an existing note' });
+		contentEl.createEl('p', { text: `${this.target.path} has the same slug. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
+		contentEl.createEl('p', {
+			text: 'Updating keeps the note\'s blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post.'
+		});
+		const row = contentEl.createDiv({ cls: 'modal-button-container' });
+		new ButtonComponent(row).setButtonText('Update existing note').setCta().onClick(() => this.finish('update'));
+		new ButtonComponent(row).setButtonText('Import as new').onClick(() => this.finish('import'));
+		new ButtonComponent(row).setButtonText('Cancel').onClick(() => this.finish('cancel'));
+	}
+	onClose(): void {
+		this.contentEl.empty();
+		this.finish('cancel');
+	}
+}
+
+/** Choose a newer pack and the note it updates. */
+class UpdateFromTextpackModal extends Modal {
+	private parsed: ParsedTextpack | null = null;
+	private targets: TFile[] = [];
+	private targetSelect: HTMLSelectElement | null = null;
+	private stateEl: HTMLElement | null = null;
+	constructor(app: App, private plugin: GhostWriterManagerPlugin) {
+		super(app);
+	}
+	private selectedTarget(): TFile | null {
+		return this.targets.find(file => file.path === this.targetSelect?.value) ?? null;
+	}
+	private async describeTarget(): Promise<void> {
+		const target = this.selectedTarget();
+		if (!this.stateEl) return;
+		if (!target) {
+			this.stateEl.setText(this.parsed
+				? 'No note has this pack\'s slug. Use "Import textpack" to create one.'
+				: '');
+			return;
+		}
+		this.stateEl.setText(TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]);
+	}
+	onOpen(): void {
+		const { contentEl } = this;
+		contentEl.createEl('h3', { text: 'Update note from textpack' });
+		contentEl.createEl('p', {
+			text: 'Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note\'s; the note keeps its blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones.'
+		});
+
+		const status = contentEl.createEl('p', { text: 'No file selected.' });
+		// No `accept` filter: iOS greys out extensions it has no type mapping for.
+		const input = contentEl.createEl('input', {
+			attr: { type: 'file', 'aria-label': 'Textpack file' }
+		});
+
+		new Setting(contentEl).setName('Note to update').addDropdown(d => {
+			this.targetSelect = d.selectEl;
+			d.onChange(() => { void this.describeTarget(); });
+		});
+		this.stateEl = contentEl.createEl('p', { text: '' });
+
+		input.addEventListener('change', () => {
+			void (async () => {
+				const f = input.files?.[0];
+				if (!f || !this.targetSelect) return;
+				try {
+					this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
+					this.targets = this.plugin.textpackUpdateTargets(this.parsed);
+					this.targetSelect.empty();
+					for (const file of this.targets) {
+						this.targetSelect.createEl('option', { text: file.path, attr: { value: file.path } });
+					}
+					status.setText(`"${this.parsed.name}" — ${this.parsed.assets.size} image(s), slug: ${this.parsed.ghost.slug ?? this.parsed.name}`);
+				} catch (e) {
+					this.parsed = null;
+					this.targets = [];
+					this.targetSelect.empty();
+					status.setText(`Could not read file: ${(e as Error).message}`);
+				}
+				await this.describeTarget();
+			})();
+		});
+
+		const row = contentEl.createDiv({ cls: 'modal-button-container' });
+		new ButtonComponent(row).setButtonText('Update note').setCta().onClick(() => {
+			void (async () => {
+				const target = this.selectedTarget();
+				if (!this.parsed) { new Notice('Choose a .textpack file first'); return; }
+				if (!target) { new Notice('No note has this pack\'s slug'); return; }
+				this.close();
+				try {
+					await this.plugin.updateNoteFromTextpack(target, this.parsed);
+				} catch (e) {
+					new Notice(`Update failed: ${(e as Error).message}`);
+				}
+			})();
+		});
+		new ButtonComponent(row).setButtonText('Cancel').onClick(() => this.close());
+	}
+	onClose(): void {
+		this.contentEl.empty();
+	}
+}
+
 class ImportTextpackModal extends Modal {
 	private parsed: ParsedTextpack | null = null;
 	private blogSelect: HTMLSelectElement | null = null;
