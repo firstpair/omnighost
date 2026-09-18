@@ -27,9 +27,12 @@ import {
 	importedTextpackAssetPaths,
 	validateInheritedTextpackSource
 } from './src/versioning/textpack-source';
+import type { TextpackMatch } from './src/importers/textpack-update';
 import {
+	matchTextpackNote,
 	mergeTextpackUpdate,
 	packOwnedKeys,
+	sourceSlugKey,
 	staleAssetPaths,
 	updateAssetFolderName
 } from './src/importers/textpack-update';
@@ -1600,6 +1603,9 @@ export default class GhostWriterManagerPlugin extends Plugin {
 		const upserts: Record<string, string> = {
 			[`${prefix}blog`]: this.blogPropertyYaml([blog]),
 			[`${prefix}slug`]: this.textpackSlug(pack),
+			// The pack's own slug, kept apart from the publishing slug so a later
+			// pack still finds this note after the writer changes its address.
+			[sourceSlugKey(prefix)]: this.textpackSlug(pack),
 		};
 		if (pack.ghost.tags && pack.ghost.tags.length > 0) {
 			upserts[`${prefix}tags`] = yamlStringArray(pack.ghost.tags, true);
@@ -1668,18 +1674,32 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	/**
-	 * Notes a pack would update: every unarchived note whose explicit slug is the
-	 * pack's. A multi-blog post is one note, so its folder need not be the pack's blog.
+	 * Notes a pack could update, best match first: those whose last pack had this
+	 * slug, then those publishing under it, then every other note in a blog folder
+	 * for a manual choice. A multi-blog post is one note, so its folder need not
+	 * be the pack's blog. Archived notes are never offered.
 	 */
-	textpackUpdateTargets(pack: ParsedTextpack): TFile[] {
+	textpackUpdateCandidates(pack: ParsedTextpack): { file: TFile; match: TextpackMatch }[] {
 		const prefix = this.settings.yamlPrefix;
 		const slug = this.textpackSlug(pack);
-		return this.app.vault.getMarkdownFiles().filter((file) => {
+		const rank: Record<TextpackMatch, number> = { 'source-slug': 0, slug: 1, none: 2 };
+		const candidates: { file: TFile; match: TextpackMatch }[] = [];
+		for (const file of this.app.vault.getMarkdownFiles()) {
 			const frontmatter = this.app.metadataCache.getFileCache(file)?.frontmatter;
-			return !!frontmatter
-				&& frontmatter[`${prefix}slug`] === slug
-				&& !frontmatter[`${prefix}archived`];
-		});
+			if (!frontmatter || frontmatter[`${prefix}archived`]) continue;
+			const match = matchTextpackNote(frontmatter, prefix, slug);
+			if (match === 'none' && !this.blogForPath(file.path)) continue;
+			candidates.push({ file, match });
+		}
+		return candidates.sort((a, b) =>
+			rank[a.match] - rank[b.match] || b.file.stat.mtime - a.file.stat.mtime);
+	}
+
+	/** The notes a pack matches on its own, without a manual choice. */
+	textpackUpdateTargets(pack: ParsedTextpack): TFile[] {
+		return this.textpackUpdateCandidates(pack)
+			.filter(candidate => candidate.match !== 'none')
+			.map(candidate => candidate.file);
 	}
 
 	/**
@@ -1711,10 +1731,10 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	}
 
 	/**
-	 * Replace what a newer pack owns in `file` — body, title, slug, tags, excerpt,
-	 * images and source version — and keep everything else the note holds: its
+	 * Replace what a newer pack owns in `file` — body, title, tags, excerpt, images
+	 * and source version — and keep everything else the note holds: its slug,
 	 * blogs, per-blog Ghost ids and URLs, publish switches and display settings.
-	 * The next sync therefore updates the same post on every blog.
+	 * The next sync therefore updates the same post, at the same address, on every blog.
 	 */
 	async updateNoteFromTextpack(file: TFile, pack: ParsedTextpack, titleOptions?: TextpackTitleOptions): Promise<void> {
 		const prefix = this.settings.yamlPrefix;
@@ -2833,9 +2853,9 @@ class TextpackMatchModal extends Modal {
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.createEl('h3', { text: 'This textpack matches an existing note' });
-		contentEl.createEl('p', { text: `${this.target.path} has the same slug. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
+		contentEl.createEl('p', { text: `${this.target.path} belongs to this pack. ${TEXTPACK_UPDATE_STATE_TEXT[this.state]}` });
 		contentEl.createEl('p', {
-			text: 'Updating keeps the note\'s blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post.'
+			text: 'Updating keeps the note\'s slug, blogs, ghost links and publish settings, so the next sync updates the same posts. Importing as new creates a second note for the same post.'
 		});
 		const row = contentEl.createDiv({ cls: 'modal-button-container' });
 		new ButtonComponent(row).setButtonText('Update existing note').setCta().onClick(() => this.finish('update'));
@@ -2852,6 +2872,7 @@ class TextpackMatchModal extends Modal {
 class UpdateFromTextpackModal extends Modal {
 	private parsed: ParsedTextpack | null = null;
 	private targets: TFile[] = [];
+	private matched = 0;
 	private targetSelect: HTMLSelectElement | null = null;
 	private stateEl: HTMLElement | null = null;
 	constructor(app: App, private plugin: GhostWriterManagerPlugin) {
@@ -2865,17 +2886,20 @@ class UpdateFromTextpackModal extends Modal {
 		if (!this.stateEl) return;
 		if (!target) {
 			this.stateEl.setText(this.parsed
-				? 'No note has this pack\'s slug. Use "Import textpack" to create one.'
+				? 'No note matches this pack by slug. Choose the note it belongs to, or use "Import textpack" to create one.'
 				: '');
 			return;
 		}
-		this.stateEl.setText(TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]);
+		const frontmatter = (this.app.metadataCache.getFileCache(target)?.frontmatter ?? {}) as Record<string, unknown>;
+		const slug = frontmatter[`${this.plugin.settings.yamlPrefix}slug`];
+		const address = typeof slug === 'string' && slug ? ` It keeps its slug "${slug}", so its posts stay at the same address.` : '';
+		this.stateEl.setText(`${TEXTPACK_UPDATE_STATE_TEXT[await this.plugin.textpackUpdateState(target)]}${address}`);
 	}
 	onOpen(): void {
 		const { contentEl } = this;
 		contentEl.createEl('h3', { text: 'Update note from textpack' });
 		contentEl.createEl('p', {
-			text: 'Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note\'s; the note keeps its blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones.'
+			text: 'Choose a newer .textpack of a post you already imported. Its body, title, tags, excerpt and images replace the note\'s; the note keeps its slug, blogs, ghost links and publish settings, so syncing updates the same posts instead of creating new ones.'
 		});
 
 		const status = contentEl.createEl('p', { text: 'No file selected.' });
@@ -2896,15 +2920,23 @@ class UpdateFromTextpackModal extends Modal {
 				if (!f || !this.targetSelect) return;
 				try {
 					this.parsed = await parseTextpack(await f.arrayBuffer(), f.name);
-					this.targets = this.plugin.textpackUpdateTargets(this.parsed);
+					const candidates = this.plugin.textpackUpdateCandidates(this.parsed);
+					this.targets = candidates.map(candidate => candidate.file);
+					this.matched = candidates.filter(candidate => candidate.match !== 'none').length;
 					this.targetSelect.empty();
-					for (const file of this.targets) {
-						this.targetSelect.createEl('option', { text: file.path, attr: { value: file.path } });
+					if (this.matched === 0) {
+						// Never preselect a note the pack does not match.
+						this.targetSelect.createEl('option', { text: 'Choose a note…', attr: { value: '' } });
+					}
+					for (const { file, match } of candidates) {
+						const label = match === 'none' ? file.path : `${file.path} (matches this pack)`;
+						this.targetSelect.createEl('option', { text: label, attr: { value: file.path } });
 					}
 					status.setText(`"${this.parsed.name}" — ${this.parsed.assets.size} image(s), slug: ${this.parsed.ghost.slug ?? this.parsed.name}`);
 				} catch (e) {
 					this.parsed = null;
 					this.targets = [];
+					this.matched = 0;
 					this.targetSelect.empty();
 					status.setText(`Could not read file: ${(e as Error).message}`);
 				}
@@ -2917,7 +2949,7 @@ class UpdateFromTextpackModal extends Modal {
 			void (async () => {
 				const target = this.selectedTarget();
 				if (!this.parsed) { new Notice('Choose a .textpack file first'); return; }
-				if (!target) { new Notice('No note has this pack\'s slug'); return; }
+				if (!target) { new Notice('Choose the note to update'); return; }
 				this.close();
 				try {
 					await this.plugin.updateNoteFromTextpack(target, this.parsed);

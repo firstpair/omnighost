@@ -163,9 +163,9 @@ Run **Import textpack** or save a `.textpack` inside the vault for automatic imp
 
 Importing a pack never overwrites a note: a second pack of the same post lands beside the first as a timestamped copy. That copy carries the pack's slug, so publishing it updates the existing Ghost post rather than duplicating it, but it knows only the one blog the pack names, and the original note, which still holds the Ghost ids, can sync its old body back later.
 
-Run **Update note from textpack** instead. Choose the newer pack; Omnighost finds the note with the same explicit slug and tells you whether it is unchanged since its last import, edited since, or was never imported from a textpack. Updating replaces what the pack owns — body, title, slug, tags, excerpt, images and source version — and keeps what only the note knows: its blog list, per-blog Ghost ids and URLs, publish and schedule switches, access, cover and provenance display settings, and any properties you added. Sync afterwards and every blog's post updates in place. A pack without tags or an excerpt leaves the note's own.
+Run **Update note from textpack** instead. Choose the newer pack; Omnighost lists the notes it matches first — by the slug their last pack was built with (`source_slug`), then by publishing slug — followed by every other note in a blog folder, so you can pick a note that an older version imported or whose slug you changed. It tells you whether the chosen note is unchanged since its last import, edited since, or was never imported from a textpack. Updating replaces what the pack owns — body, title, tags, excerpt, images and source version — and keeps what only the note knows: its slug (so a published post never moves), its blog list, per-blog Ghost ids and URLs, publish and schedule switches, access, cover and provenance display settings, and any properties you added. Sync afterwards and every blog's post updates in place. A pack without tags or an excerpt leaves the note's own.
 
-Saving a `.textpack` into the vault does the same when exactly one note has its slug: it asks whether to update that note or import a copy.
+Saving a `.textpack` into the vault does the same when exactly one note matches it: it asks whether to update that note or import a copy.
 
 ### Importing from Ghost
 
