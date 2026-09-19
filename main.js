@@ -4674,6 +4674,27 @@ function sharedWithOtherNotes(allLinks, selected) {
   return shared;
 }
 
+// src/self-reload.ts
+function pluginHost(app) {
+  if (!app || typeof app !== "object")
+    return null;
+  const plugins = app.plugins;
+  if (!plugins || typeof plugins !== "object")
+    return null;
+  const host = plugins;
+  if (typeof host.disablePlugin !== "function" || typeof host.enablePlugin !== "function")
+    return null;
+  return plugins;
+}
+async function reloadPlugin(host, id, installedVersion) {
+  var _a;
+  await host.disablePlugin(id);
+  const cached = (_a = host.manifests) == null ? void 0 : _a[id];
+  if (cached && installedVersion)
+    cached.version = installedVersion;
+  await host.enablePlugin(id);
+}
+
 // src/importers/textpack-update.ts
 var SOURCE_KEY_PREFIX = "source_";
 function frontmatterBlocks(raw) {
@@ -4769,6 +4790,8 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
     /** In-memory index of synced notes: file path → { blog id → ghost post id }. */
     /** In-memory index of synced notes: file path → its deletable note↔post links. */
     this.ghostIndex = /* @__PURE__ */ new Map();
+    /** Syncs and bulk deletes in flight. An update never reloads the plugin under them. */
+    this.busyOperations = 0;
     /** Folders deleted since the last batch tick (collected to detect a cascade). */
     this.pendingDeletedFolders = [];
   }
@@ -5212,7 +5235,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
   }
   /** Download and replace the complete three-file Obsidian runtime bundle. */
   async updateFromCodex() {
-    var _a;
+    var _a, _b;
     const pluginDir = this.manifest.dir;
     if (!pluginDir) {
       new import_obsidian12.Notice("Cannot locate the omnighost plugin folder");
@@ -5264,7 +5287,7 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
       }
       for (const backup of backupPaths.values())
         await this.removeIfPresent(backup);
-      new import_obsidian12.Notice("Omnighost updated. Restart Obsidian to load the new version.", 1e4);
+      this.loadInstalledUpdate(this.installedVersion((_b = files.get("manifest.json")) != null ? _b : ""));
     } catch (error) {
       console.error("[Omnighost] Codex update failed:", error);
       for (const file of CODEX_UPDATE_FILES) {
@@ -5282,6 +5305,43 @@ var GhostWriterManagerPlugin = class extends import_obsidian12.Plugin {
       const message = error instanceof Error ? error.message : String(error);
       new import_obsidian12.Notice(`Omnighost update failed: ${message}`, 1e4);
     }
+  }
+  installedVersion(manifestText) {
+    try {
+      const version = JSON.parse(manifestText).version;
+      return typeof version === "string" ? version : "";
+    } catch (e) {
+      return "";
+    }
+  }
+  /**
+   * Load the build that was just installed, without a restart. Falls back to
+   * asking for one when Obsidian lacks the internal plugin manager, and never
+   * reloads under a sync or bulk delete: unloading mid-request could leave a
+   * post written on Ghost with its id not yet written back to the note.
+   */
+  loadInstalledUpdate(version) {
+    const label = version ? ` ${version}` : "";
+    const manual = `Omnighost${label} is installed. Switch the plugin off and on in settings, or restart Obsidian, to load it.`;
+    const host = pluginHost(this.app);
+    if (!host) {
+      new import_obsidian12.Notice(manual, 1e4);
+      return;
+    }
+    if (this.busyOperations > 0) {
+      new import_obsidian12.Notice(`A sync or delete is still running, so the plugin was not reloaded. ${manual}`, 12e3);
+      return;
+    }
+    new import_obsidian12.Notice(`Omnighost${label} installed. Reloading the plugin\u2026`);
+    const id = this.manifest.id;
+    window.setTimeout(() => {
+      void reloadPlugin(host, id, version || void 0).then(() => {
+        new import_obsidian12.Notice(`Omnighost${label} is loaded.`);
+      }).catch((error) => {
+        console.error("[Omnighost] reload after update failed:", error);
+        new import_obsidian12.Notice(manual, 1e4);
+      });
+    }, 250);
   }
   validateCodexUpdate(files) {
     var _a, _b, _c;
@@ -5979,6 +6039,14 @@ ${bodyMarkdown}`;
    * The shared g_slug is written once. No blog "owns" the bare g_id/g_url keys.
    */
   async syncFileToBlogs(file, blogs) {
+    this.busyOperations++;
+    try {
+      return await this.syncFileToBlogsNow(file, blogs);
+    } finally {
+      this.busyOperations--;
+    }
+  }
+  async syncFileToBlogsNow(file, blogs) {
     var _a, _b, _c, _d;
     if (blogs.length === 0) {
       new import_obsidian12.Notice("No ghost blog configured \u2014 add one in settings.");
@@ -7052,6 +7120,14 @@ ${bodyMarkdown}`;
    * so its other posts keep a note to be updated from.
    */
   async executeBulkDelete(items, deleteLocal) {
+    this.busyOperations++;
+    try {
+      await this.executeBulkDeleteNow(items, deleteLocal);
+    } finally {
+      this.busyOperations--;
+    }
+  }
+  async executeBulkDeleteNow(items, deleteLocal) {
     let ok = 0, fail = 0, skipped = 0;
     const allLinks = this.allPostLinks();
     const deleted = [];

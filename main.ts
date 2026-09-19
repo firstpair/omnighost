@@ -28,6 +28,7 @@ import {
 	validateInheritedTextpackSource
 } from './src/versioning/textpack-source';
 import { newestFirst, removableNotes, sharedWithOtherNotes } from './src/bulk-delete';
+import { pluginHost, reloadPlugin } from './src/self-reload';
 import type { PostLink } from './src/bulk-delete';
 import type { TextpackMatch } from './src/importers/textpack-update';
 import {
@@ -94,6 +95,8 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	/** In-memory index of synced notes: file path → { blog id → ghost post id }. */
 	/** In-memory index of synced notes: file path → its deletable note↔post links. */
 	private ghostIndex = new Map<string, BulkDeleteItem[]>();
+	/** Syncs and bulk deletes in flight. An update never reloads the plugin under them. */
+	private busyOperations = 0;
 	/** Folders deleted since the last batch tick (collected to detect a cascade). */
 	private pendingDeletedFolders: string[] = [];
 	private deleteBatchTimer?: number;
@@ -657,7 +660,7 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			}
 
 			for (const backup of backupPaths.values()) await this.removeIfPresent(backup);
-			new Notice('Omnighost updated. Restart Obsidian to load the new version.', 10000);
+			this.loadInstalledUpdate(this.installedVersion(files.get('manifest.json') ?? ''));
 		} catch (error) {
 			console.error('[Omnighost] Codex update failed:', error);
 			// Restore the former complete set whenever installation was interrupted.
@@ -675,6 +678,46 @@ export default class GhostWriterManagerPlugin extends Plugin {
 			const message = error instanceof Error ? error.message : String(error);
 			new Notice(`Omnighost update failed: ${message}`, 10000);
 		}
+	}
+
+	private installedVersion(manifestText: string): string {
+		try {
+			const version = (JSON.parse(manifestText) as { version?: unknown }).version;
+			return typeof version === 'string' ? version : '';
+		} catch {
+			return '';
+		}
+	}
+
+	/**
+	 * Load the build that was just installed, without a restart. Falls back to
+	 * asking for one when Obsidian lacks the internal plugin manager, and never
+	 * reloads under a sync or bulk delete: unloading mid-request could leave a
+	 * post written on Ghost with its id not yet written back to the note.
+	 */
+	private loadInstalledUpdate(version: string): void {
+		const label = version ? ` ${version}` : '';
+		const manual = `Omnighost${label} is installed. Switch the plugin off and on in settings, or restart Obsidian, to load it.`;
+		const host = pluginHost(this.app);
+		if (!host) {
+			new Notice(manual, 10000);
+			return;
+		}
+		if (this.busyOperations > 0) {
+			new Notice(`A sync or delete is still running, so the plugin was not reloaded. ${manual}`, 12000);
+			return;
+		}
+		new Notice(`Omnighost${label} installed. Reloading the plugin…`);
+		const id = this.manifest.id;
+		// Deferred: this call stack belongs to the instance about to be unloaded.
+		window.setTimeout(() => {
+			void reloadPlugin(host, id, version || undefined)
+				.then(() => { new Notice(`Omnighost${label} is loaded.`); })
+				.catch((error: unknown) => {
+					console.error('[Omnighost] reload after update failed:', error);
+					new Notice(manual, 10000);
+				});
+		}, 250);
 	}
 
 	private validateCodexUpdate(files: ReadonlyMap<CodexUpdateFile, string>): void {
@@ -1394,6 +1437,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	 * The shared g_slug is written once. No blog "owns" the bare g_id/g_url keys.
 	 */
 	async syncFileToBlogs(file: TFile, blogs: GhostBlog[]): Promise<boolean> {
+		this.busyOperations++;
+		try {
+			return await this.syncFileToBlogsNow(file, blogs);
+		} finally {
+			this.busyOperations--;
+		}
+	}
+
+	private async syncFileToBlogsNow(file: TFile, blogs: GhostBlog[]): Promise<boolean> {
 		if (blogs.length === 0) {
 			new Notice('No ghost blog configured — add one in settings.');
 			return false;
@@ -2507,6 +2559,15 @@ export default class GhostWriterManagerPlugin extends Plugin {
 	 * so its other posts keep a note to be updated from.
 	 */
 	async executeBulkDelete(items: BulkDeleteItem[], deleteLocal: boolean): Promise<void> {
+		this.busyOperations++;
+		try {
+			await this.executeBulkDeleteNow(items, deleteLocal);
+		} finally {
+			this.busyOperations--;
+		}
+	}
+
+	private async executeBulkDeleteNow(items: BulkDeleteItem[], deleteLocal: boolean): Promise<void> {
 		let ok = 0, fail = 0, skipped = 0;
 		const allLinks = this.allPostLinks();
 		const deleted: BulkDeleteItem[] = [];
