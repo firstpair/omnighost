@@ -522,6 +522,21 @@ export class GhostAPIClient {
 	}
 
 	/**
+	 * Status and timestamps of every post, without bodies: what a list needs to
+	 * date its rows, at a fraction of the cost of `getPosts`.
+	 */
+	async getPostTimes(): Promise<{ id: string; status: string; published_at: string | null; updated_at: string | null }[]> {
+		const response = await this.makeRequest('/posts/?fields=id,status,published_at,updated_at&limit=all');
+		if (response.status !== 200) {
+			throw new Error(`Failed to fetch post times: ${response.status} ${response.text}`);
+		}
+		const data = response.json as {
+			posts?: { id: string; status: string; published_at: string | null; updated_at: string | null }[];
+		};
+		return data.posts ?? [];
+	}
+
+	/**
 	 * Get a single post by ID
 	 */
 	async getPost(postId: string): Promise<GhostPost> {
