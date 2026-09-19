@@ -178,7 +178,7 @@ Imported and linked notes receive `ghost_blog` plus the per-blog id, editor URL,
 
 ### Bulk delete and archives
 
-Run **Bulk delete posts (local notes + ghost)** to choose one or more blogs, review a checklist of linked notes/posts, uncheck anything to keep, then confirm. Checked items delete the remote Ghost post and remove the local note. If **Archive deleted notes** is enabled, local notes move into an archive subfolder inside their blog folder and get `ghost_archived`, `ghost_archived_at`, `ghost_archived_from`, and `ghost_no_sync: true`; otherwise they go to Obsidian trash.
+Run **Bulk delete posts (local notes + ghost)** to choose one or more blogs and review a checklist of linked notes/posts. Nothing is checked to begin with; rows are listed latest first, each with its date and public URL. Checked items delete the remote Ghost post. The local note is removed too, unless it is still published on another blog: then it stays and only the deleted blog's id and URL properties are cleared. The confirmation says how many notes will be removed and kept, and warns when a selected post is also linked from a note you did not select. If **Archive deleted notes** is enabled, local notes move into an archive subfolder inside their blog folder and get `ghost_archived`, `ghost_archived_at`, `ghost_archived_from`, and `ghost_no_sync: true`; otherwise they go to Obsidian trash.
 
 Deletion is never automatic. If **Prompt on folder delete** is enabled and you delete a folder of synced notes, Omnighost opens the same checklist for the linked Ghost posts after the local folder is gone. **Confirm each remote delete** adds a per-post Delete / Skip / Stop prompt during the batch.
 

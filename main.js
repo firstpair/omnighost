@@ -4640,6 +4640,40 @@ async function ensureNoteVersioned(app, file, expectedSource) {
   return withRepositoryLock(repositoryRoot, () => ensureVersionInRepository(context, app, file, expectedSource));
 }
 
+// src/bulk-delete.ts
+function postKey(link) {
+  return `${link.blogId}:${link.ghostId}`;
+}
+function newestFirst(items) {
+  return [...items].sort((a, b) => b.when - a.when || a.title.localeCompare(b.title));
+}
+function removableNotes(allLinks, deleted) {
+  const gone = new Set(deleted.map((link) => `${link.path}|${postKey(link)}`));
+  const touched = new Set(deleted.map((link) => link.path));
+  const removable = new Set(touched);
+  for (const link of allLinks) {
+    if (touched.has(link.path) && !gone.has(`${link.path}|${postKey(link)}`)) {
+      removable.delete(link.path);
+    }
+  }
+  return removable;
+}
+function sharedWithOtherNotes(allLinks, selected) {
+  var _a;
+  const selectedPaths = new Set(selected.map((link) => link.path));
+  const selectedKeys = new Set(selected.map(postKey));
+  const shared = /* @__PURE__ */ new Map();
+  for (const link of allLinks) {
+    if (selectedPaths.has(link.path) || !selectedKeys.has(postKey(link)))
+      continue;
+    const paths = (_a = shared.get(postKey(link))) != null ? _a : [];
+    if (!paths.includes(link.path))
+      paths.push(link.path);
+    shared.set(postKey(link), paths);
+  }
+  return shared;
+}
+
 // src/importers/textpack-update.ts
 var SOURCE_KEY_PREFIX = "source_";
 function frontmatterBlocks(raw) {
@@ -6881,14 +6915,31 @@ ${bodyMarkdown}`;
     const fmObj = (_a = cache == null ? void 0 : cache.frontmatter) != null ? _a : {};
     const pub = fmObj[`${prefix}published`];
     const published = pub === true || pub === "true";
+    const rawPublishedAt = fmObj[`${prefix}published_at`];
+    const publishedAt = rawPublishedAt instanceof Date ? rawPublishedAt.getTime() : Date.parse(typeof rawPublishedAt === "string" ? rawPublishedAt : "");
+    const when = Number.isNaN(publishedAt) ? file.stat.ctime : publishedAt;
+    const slug = typeof fmObj[`${prefix}slug`] === "string" ? String(fmObj[`${prefix}slug`]) : "";
     return this.resolveGhostJobs(fmObj).map((j) => ({
       blogId: j.blog.id,
       blogName: j.blog.name,
       ghostId: j.id,
       title: file.basename,
       published,
-      path: file.path
+      path: file.path,
+      when,
+      detail: this.readBlogPublicUrl(fmObj, j.blog) || (slug ? `slug: ${slug}` : file.path)
     }));
+  }
+  /** Every note↔post link of every unarchived note in a blog folder, on every blog. */
+  allPostLinks() {
+    const links = [];
+    for (const f of this.app.vault.getMarkdownFiles()) {
+      if (!this.fileInAnyBlogFolder(f))
+        continue;
+      for (const it of this.bulkItemsForFile(f))
+        links.push({ path: it.path, blogId: it.blogId, ghostId: it.ghostId });
+    }
+    return links;
   }
   /** Maintain the in-memory index (path → linked Ghost posts) used to know what
    *  to offer for deletion AFTER a note/folder is gone (its cache is purged). */
@@ -6983,7 +7034,8 @@ ${bodyMarkdown}`;
       heading: `Folder deleted \u2014 delete ${items.length} linked Ghost post${items.length === 1 ? "" : "s"}?`,
       subtext: "These notes were just removed locally. Choose which of their Ghost posts to also delete. Nothing is deleted until you confirm.",
       deleteLocal: false,
-      items
+      items: newestFirst(items),
+      allLinks: this.allPostLinks()
     }).open();
   }
   /** Delete one remote post on its blog. */
@@ -6993,9 +7045,16 @@ ${bodyMarkdown}`;
       throw new Error("Unknown blog for delete");
     await this.getClientForBlog(blog).deletePost(ghostId);
   }
-  /** Run the confirmed bulk delete: optional per-post confirm, Stop aborts the rest. */
+  /**
+   * Run the confirmed bulk delete: optional per-post confirm, Stop aborts the
+   * rest. A note is removed only when no post of it is left on any blog; a note
+   * still published elsewhere stays and loses only the deleted blog's id and URLs,
+   * so its other posts keep a note to be updated from.
+   */
   async executeBulkDelete(items, deleteLocal) {
     let ok = 0, fail = 0, skipped = 0;
+    const allLinks = this.allPostLinks();
+    const deleted = [];
     for (const it of items) {
       if (this.settings.confirmEachRemoteDelete) {
         const decision = await new Promise((resolve) => {
@@ -7011,28 +7070,48 @@ ${bodyMarkdown}`;
       try {
         await this.deleteOneRemote(it.blogId, it.ghostId);
         ok++;
+        deleted.push(it);
       } catch (e) {
         fail++;
         console.error("[Ghost] bulk delete failed:", e);
-        continue;
       }
-      if (deleteLocal && it.path) {
-        const f = this.app.vault.getAbstractFileByPath(it.path);
-        if (f instanceof import_obsidian12.TFile) {
-          try {
+    }
+    let kept = 0;
+    if (deleteLocal) {
+      const removable = removableNotes(allLinks, deleted);
+      for (const path of new Set(deleted.map((it) => it.path))) {
+        const f = this.app.vault.getAbstractFileByPath(path);
+        if (!(f instanceof import_obsidian12.TFile))
+          continue;
+        try {
+          if (removable.has(path)) {
             if (this.settings.archiveDeletedNotes)
               await this.archiveNote(f);
             else
               await this.app.fileManager.trashFile(f);
-          } catch (e) {
-            console.error("[Ghost] local note archive/delete failed:", e);
+            continue;
           }
+          kept++;
+          for (const it of deleted.filter((d) => d.path === path)) {
+            const blog = this.settings.blogs.find((b) => b.id === it.blogId);
+            if (!blog)
+              continue;
+            const { keys } = this.storedKeysForBlog(f, blog);
+            await this.app.vault.process(f, (content) => removeFrontmatterKeys(content, keys));
+          }
+        } catch (e) {
+          console.error("[Ghost] local note archive/delete failed:", e);
         }
       }
+    }
+    for (const it of deleted) {
       if (it.path && this.ghostIndex)
         this.ghostIndex.delete(it.path);
+      const f = it.path ? this.app.vault.getAbstractFileByPath(it.path) : null;
+      if (f instanceof import_obsidian12.TFile)
+        this.indexFile(f);
     }
-    new import_obsidian12.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}`);
+    new import_obsidian12.Notice(`Deleted ${ok} post${ok === 1 ? "" : "s"} on Ghost${fail ? `, ${fail} failed` : ""}${skipped ? `, ${skipped} skipped` : ""}${kept ? `; kept ${kept} note${kept === 1 ? "" : "s"} still published elsewhere` : ""}`);
   }
   /** On-demand bulk delete: pick blog(s), list their linked posts (all checked). */
   openBulkDeleteCommand() {
@@ -7066,9 +7145,10 @@ ${bodyMarkdown}`;
         }
         new BulkDeleteModal(this.app, this, {
           heading: `Delete ${items.length} note${items.length === 1 ? "" : "s"} + their Ghost posts?`,
-          subtext: "Unchecked items are left alone. For checked items, both the local note and the remote post are deleted.",
+          subtext: "Latest first. Unchecked items are left alone. A checked post is deleted on ghost; its note is removed too unless it is still published on another blog, in which case the note stays and only that blog's link is cleared.",
           deleteLocal: true,
-          items
+          items: newestFirst(items),
+          allLinks: this.allPostLinks()
         }).open();
       }
     ).open();
@@ -7706,8 +7786,10 @@ var BulkDeleteModal = class extends import_obsidian12.Modal {
         syncMaster();
       };
       rowBoxes.push(cb);
-      row2.createSpan({ text: ` ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
+      const day = new Date(it.when).toISOString().slice(0, 10);
+      row2.createSpan({ text: ` ${day}  ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
       row2.createEl("br");
+      row2.createEl("small", { text: it.detail, cls: "omnighost-bulk-detail" });
     });
     const row = contentEl.createDiv({ cls: "modal-button-container" });
     new import_obsidian12.ButtonComponent(row).setButtonText("Delete selected").setWarning().onClick(() => this.submit());
@@ -7719,11 +7801,16 @@ var BulkDeleteModal = class extends import_obsidian12.Modal {
       new import_obsidian12.Notice("Nothing selected.");
       return;
     }
-    const localPart = this.opts.deleteLocal ? ` and ${items.length} local note${items.length === 1 ? "" : "s"}` : "";
+    const removable = removableNotes(this.opts.allLinks, items);
+    const localPart = this.opts.deleteLocal ? ` and remove ${removable.size} local note${removable.size === 1 ? "" : "s"}` : "";
+    const touched = new Set(items.map((it) => it.path)).size;
+    const keptPart = this.opts.deleteLocal && touched > removable.size ? ` ${touched - removable.size} note${touched - removable.size === 1 ? " stays because it is" : "s stay because they are"} still published on another blog.` : "";
+    const shared = sharedWithOtherNotes(this.opts.allLinks, items);
+    const sharedPart = shared.size > 0 ? ` Warning: ${shared.size} selected post${shared.size === 1 ? " is" : "s are"} also linked from ${[...new Set([...shared.values()].flat())].join(", ")}; ${shared.size === 1 ? "that note" : "those notes"} will point at a deleted post.` : "";
     new SimpleConfirmModal(
       this.app,
       "Confirm bulk delete",
-      `Permanently delete ${items.length} post${items.length === 1 ? "" : "s"} on Ghost${localPart}? This cannot be undone.`,
+      `Permanently delete ${items.length} post${items.length === 1 ? "" : "s"} on Ghost${localPart}?${keptPart}${sharedPart} This cannot be undone.`,
       "Delete",
       (confirmed) => {
         if (!confirmed)
