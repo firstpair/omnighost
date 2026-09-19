@@ -1074,6 +1074,19 @@ Content-Type: ${upload.mimeType}\r
     }
   }
   /**
+   * Status and timestamps of every post, without bodies: what a list needs to
+   * date its rows, at a fraction of the cost of `getPosts`.
+   */
+  async getPostTimes() {
+    var _a;
+    const response = await this.makeRequest("/posts/?fields=id,status,published_at,updated_at&limit=all");
+    if (response.status !== 200) {
+      throw new Error(`Failed to fetch post times: ${response.status} ${response.text}`);
+    }
+    const data = response.json;
+    return (_a = data.posts) != null ? _a : [];
+  }
+  /**
    * Get a single post by ID
    */
   async getPost(postId) {
@@ -4673,6 +4686,21 @@ function sharedWithOtherNotes(allLinks, selected) {
   }
   return shared;
 }
+function withGhostTimes(items, timesByBlog) {
+  const byKey = /* @__PURE__ */ new Map();
+  for (const [blogId, times] of timesByBlog) {
+    for (const time of times)
+      byKey.set(`${blogId}:${time.id}`, time);
+  }
+  return items.map((item) => {
+    var _a, _b;
+    const time = byKey.get(postKey(item));
+    const stamp = time ? Date.parse((_b = (_a = time.status === "published" ? time.published_at : null) != null ? _a : time.updated_at) != null ? _b : "") : NaN;
+    if (!time || Number.isNaN(stamp))
+      return { ...item, whenFromGhost: false };
+    return { ...item, when: stamp, published: time.status === "published", whenFromGhost: true };
+  });
+}
 
 // src/self-reload.ts
 function pluginHost(app) {
@@ -7219,15 +7247,42 @@ ${bodyMarkdown}`;
           new import_obsidian12.Notice("No linked ghost posts found in the selected folder(s).");
           return;
         }
-        new BulkDeleteModal(this.app, this, {
-          heading: `Delete ${items.length} note${items.length === 1 ? "" : "s"} + their Ghost posts?`,
-          subtext: "Latest first. Unchecked items are left alone. A checked post is deleted on ghost; its note is removed too unless it is still published on another blog, in which case the note stays and only that blog's link is cleared.",
-          deleteLocal: true,
-          items: newestFirst(items),
-          allLinks: this.allPostLinks()
-        }).open();
+        void this.openBulkDeleteChecklist(chosen, items);
       }
     ).open();
+  }
+  /**
+   * Date the rows from ghost, then show the checklist. A note's own date is a
+   * poor guide to its post's. A blog that cannot be reached keeps its notes'
+   * dates, and those rows are marked.
+   */
+  async openBulkDeleteChecklist(blogs, items) {
+    const progress = new import_obsidian12.Notice("Reading post dates from ghost\u2026", 0);
+    const timesByBlog = /* @__PURE__ */ new Map();
+    const unreachable = [];
+    await Promise.all(blogs.map(async (blog) => {
+      try {
+        timesByBlog.set(blog.id, await this.getClientForBlog(blog).getPostTimes());
+      } catch (e) {
+        console.error(`[Ghost] could not read post dates from ${blog.name}:`, e);
+        unreachable.push(blog.name);
+      }
+    }));
+    progress.hide();
+    const dated = newestFirst(withGhostTimes(items, timesByBlog));
+    let approximate = "";
+    if (unreachable.length > 0) {
+      approximate = ` Dates marked ~ are the note's own, because ${unreachable.join(", ")} could not be reached.`;
+    } else if (dated.some((it) => !it.whenFromGhost)) {
+      approximate = " Dates marked ~ are the note's own, because ghost has no such post.";
+    }
+    new BulkDeleteModal(this.app, this, {
+      heading: `Delete ${items.length} note${items.length === 1 ? "" : "s"} + their Ghost posts?`,
+      subtext: `Latest first, by when ghost published each post.${approximate} Unchecked items are left alone. A checked post is deleted on ghost; its note is removed too unless it is still published on another blog, in which case the note stays and only that blog's link is cleared.`,
+      deleteLocal: true,
+      items: dated,
+      allLinks: this.allPostLinks()
+    }).open();
   }
   // ─── Orphaned posts (blogs removed from g_blog) ──────────────────────────
   /** Posts the note still has on blogs NOT named in g_blog (stored id, no longer targeted). */
@@ -7862,7 +7917,9 @@ var BulkDeleteModal = class extends import_obsidian12.Modal {
         syncMaster();
       };
       rowBoxes.push(cb);
-      const day = new Date(it.when).toISOString().slice(0, 10);
+      const stamp = new Date(it.when);
+      const pad = (n) => String(n).padStart(2, "0");
+      const day = `${it.whenFromGhost === false ? "~" : ""}${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}:${pad(stamp.getMinutes())}`;
       row2.createSpan({ text: ` ${day}  ${it.title}  \u2014  ${it.blogName}  (${it.published ? "published" : "draft"})` });
       row2.createEl("br");
       row2.createEl("small", { text: it.detail, cls: "omnighost-bulk-detail" });

@@ -53,3 +53,35 @@ export function sharedWithOtherNotes(allLinks: PostLink[], selected: PostLink[])
 	}
 	return shared;
 }
+
+/** What Ghost says about one post. */
+export interface PostTime {
+	id: string;
+	status: string;
+	published_at: string | null;
+	updated_at: string | null;
+}
+
+/**
+ * Date rows from Ghost rather than from the note. A note's own date is a poor
+ * guide: its `published_at` property is often empty, and its file may be far
+ * older than the post it links to. A published post is dated by when it was
+ * published, a draft by when it was last changed. Rows on a blog that could not
+ * be asked, or whose post Ghost no longer has, keep the note's date and are
+ * marked, so an approximate date is never mistaken for a real one.
+ */
+export function withGhostTimes<T extends { blogId: string; ghostId: string; when: number; published: boolean }>(
+	items: T[],
+	timesByBlog: Map<string, PostTime[]>
+): (T & { whenFromGhost: boolean })[] {
+	const byKey = new Map<string, PostTime>();
+	for (const [blogId, times] of timesByBlog) {
+		for (const time of times) byKey.set(`${blogId}:${time.id}`, time);
+	}
+	return items.map((item) => {
+		const time = byKey.get(postKey(item));
+		const stamp = time ? Date.parse((time.status === 'published' ? time.published_at : null) ?? time.updated_at ?? '') : NaN;
+		if (!time || Number.isNaN(stamp)) return { ...item, whenFromGhost: false };
+		return { ...item, when: stamp, published: time.status === 'published', whenFromGhost: true };
+	});
+}

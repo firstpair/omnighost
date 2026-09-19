@@ -27,9 +27,9 @@ import {
 	importedTextpackAssetPaths,
 	validateInheritedTextpackSource
 } from './src/versioning/textpack-source';
-import { newestFirst, removableNotes, sharedWithOtherNotes } from './src/bulk-delete';
+import { newestFirst, removableNotes, sharedWithOtherNotes, withGhostTimes } from './src/bulk-delete';
 import { pluginHost, reloadPlugin } from './src/self-reload';
-import type { PostLink } from './src/bulk-delete';
+import type { PostLink, PostTime } from './src/bulk-delete';
 import type { TextpackMatch } from './src/importers/textpack-update';
 import {
 	matchTextpackNote,
@@ -58,8 +58,10 @@ interface BulkDeleteItem {
 	title: string;
 	published: boolean;
 	path: string;
-	/** Publication time, else the note's creation time; rows are listed latest first. */
+	/** When ghost published the post (a draft: last changed it); rows are listed latest first. */
 	when: number;
+	/** False when ghost could not be asked and `when` is only the note's own date. */
+	whenFromGhost?: boolean;
 	/** The post's public URL, else its slug, so look-alike rows can be told apart. */
 	detail: string;
 }
@@ -2648,15 +2650,44 @@ export default class GhostWriterManagerPlugin extends Plugin {
 					new Notice('No linked ghost posts found in the selected folder(s).');
 					return;
 				}
-				new BulkDeleteModal(this.app, this, {
-					heading: `Delete ${items.length} note${items.length === 1 ? '' : 's'} + their Ghost posts?`,
-					subtext: 'Latest first. Unchecked items are left alone. A checked post is deleted on ghost; its note is removed too unless it is still published on another blog, in which case the note stays and only that blog\'s link is cleared.',
-					deleteLocal: true,
-					items: newestFirst(items),
-					allLinks: this.allPostLinks(),
-				}).open();
+				void this.openBulkDeleteChecklist(chosen, items);
 			}
 		).open();
+	}
+
+	/**
+	 * Date the rows from ghost, then show the checklist. A note's own date is a
+	 * poor guide to its post's. A blog that cannot be reached keeps its notes'
+	 * dates, and those rows are marked.
+	 */
+	private async openBulkDeleteChecklist(blogs: GhostBlog[], items: BulkDeleteItem[]): Promise<void> {
+		const progress = new Notice('Reading post dates from ghost…', 0);
+		const timesByBlog = new Map<string, PostTime[]>();
+		const unreachable: string[] = [];
+		await Promise.all(blogs.map(async (blog) => {
+			try {
+				timesByBlog.set(blog.id, await this.getClientForBlog(blog).getPostTimes());
+			} catch (e) {
+				console.error(`[Ghost] could not read post dates from ${blog.name}:`, e);
+				unreachable.push(blog.name);
+			}
+		}));
+		progress.hide();
+
+		const dated = newestFirst(withGhostTimes(items, timesByBlog));
+		let approximate = '';
+		if (unreachable.length > 0) {
+			approximate = ` Dates marked ~ are the note's own, because ${unreachable.join(', ')} could not be reached.`;
+		} else if (dated.some(it => !it.whenFromGhost)) {
+			approximate = ' Dates marked ~ are the note\'s own, because ghost has no such post.';
+		}
+		new BulkDeleteModal(this.app, this, {
+			heading: `Delete ${items.length} note${items.length === 1 ? '' : 's'} + their Ghost posts?`,
+			subtext: `Latest first, by when ghost published each post.${approximate} Unchecked items are left alone. A checked post is deleted on ghost; its note is removed too unless it is still published on another blog, in which case the note stays and only that blog's link is cleared.`,
+			deleteLocal: true,
+			items: dated,
+			allLinks: this.allPostLinks(),
+		}).open();
 	}
 
 	// ─── Orphaned posts (blogs removed from g_blog) ──────────────────────────
@@ -3264,7 +3295,10 @@ class BulkDeleteModal extends Modal {
 			cb.checked = false;
 			cb.onchange = () => { this.checked[i] = cb.checked; syncMaster(); };
 			rowBoxes.push(cb);
-			const day = new Date(it.when).toISOString().slice(0, 10);
+			const stamp = new Date(it.when);
+			const pad = (n: number) => String(n).padStart(2, '0');
+			// Local time to the minute, so two posts made the same day stay apart.
+			const day = `${it.whenFromGhost === false ? '~' : ''}${stamp.getFullYear()}-${pad(stamp.getMonth() + 1)}-${pad(stamp.getDate())} ${pad(stamp.getHours())}:${pad(stamp.getMinutes())}`;
 			row.createSpan({ text: ` ${day}  ${it.title}  —  ${it.blogName}  (${it.published ? 'published' : 'draft'})` });
 			row.createEl('br');
 			row.createEl('small', { text: it.detail, cls: 'omnighost-bulk-detail' });
