@@ -42,6 +42,10 @@ Publish and **update** Ghost CMS posts from Obsidian — on **desktop and iOS** 
 5. Restart Obsidian (or reload the app).
 6. Go to **Settings → Community plugins** and enable **Omnighost**.
 
+### Updating
+
+Run **Update from GitHub**. It downloads `main.js`, `manifest.json` and `styles.css` from the `main` branch, checks them, swaps them in with a rollback if anything fails, and then reloads the plugin so the new build is running without restarting Obsidian. If a sync or bulk delete is in progress, or your Obsidian lacks the internal plugin manager the reload relies on, it installs the files and asks you to switch the plugin off and on in **Settings → Community plugins** (or restart) instead.
+
 > **iOS note.** The `.obsidian` folder is hidden in the Files app; the easiest path is to install/enable any community plugin once so the `plugins/` folder exists, then drop `omnighost/` in beside it. Your vault must be in a Files-accessible location (On My iPhone or iCloud Drive).
 
 ### Via BRAT (beta, auto-updating)
