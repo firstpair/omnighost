@@ -51,7 +51,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           CODENAME=$(awk -F'|' -v tag="$TAG" '$3 ~ " " tag " " { gsub(/[* ]/, "", $2); print $2; exit }' RELEASES.md)
-          TITLE="${CODENAME:+$CODENAME }$TAG"
+          # Every published release is titled "Omnighost <codename?> <tag>";
+          # this job had never run, so its bare-tag title was never compared.
+          TITLE="Omnighost ${CODENAME:+$CODENAME }$TAG"
           ASSETS=(main.js manifest.json styles.css)
           for asset in docs/book/dist/obsidian.epub docs/book/dist/obsidian.pdf; do
             if [ -f "$asset" ]; then
