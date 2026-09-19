@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "*.*.*"
+  # Lets an already-pushed tag be built without retagging, and gives a way to
+  # prove the job works at all from the Actions tab.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and release
+        required: true
 
 permissions:
   contents: write
@@ -16,6 +23,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -48,7 +58,7 @@ jobs:
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           CODENAME=$(awk -F'|' -v tag="$TAG" '$3 ~ " " tag " " { gsub(/[* ]/, "", $2); print $2; exit }' RELEASES.md)
           # Every published release is titled "Omnighost <codename?> <tag>";
