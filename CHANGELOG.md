@@ -7,22 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.5] - 2026-09-19
+
+### Fixed
+- The changelog records which release each change shipped in. Everything from 0.16.3 onward had accumulated under `[Unreleased]`, so five releases published on September 18 and 19 documented nothing. Each entry was attributed by finding the commit that added it and the first tag containing that commit; none was reworded or reconstructed. The gap where releases 0.11.0 through 0.16.2 left no entries is now stated rather than silent.
+- The release workflow titles its releases `Omnighost <version>`, matching every release published by hand. It had never run, so its bare-tag title had never been compared.
+
+### Added
+- The release workflow can be dispatched for an existing tag, so a pushed tag can be built without retagging.
+
+## [0.17.4] - 2026-09-19
+
 ### Fixed
 - The bulk-delete checklist dates its rows from Ghost instead of from the note. A note's `published_at` property is often empty, and its file can be much older than the post it links to: a duplicate post created the night before was listed under the date its note file was first imported, five days earlier. Before the checklist opens, each chosen blog is asked once for its posts' ids, status and timestamps only. A published post is dated by when it was published and a draft by when it was last changed, the published/draft label now comes from Ghost too, and rows show local date and time to the minute. A blog that cannot be reached, or a post Ghost no longer has, keeps the note's date, and those rows are marked `~` with the reason stated above the list.
-- **Bulk delete** no longer removes a note that is still published elsewhere. The checklist has one row per note and blog, and deleting one blog's post used to trash or archive the whole note, leaving its posts on other blogs with nothing in the vault to update them from; choosing a single blog in the first step did the same without showing the other posts at all. A note is now removed only when none of its posts is left on any blog. Otherwise it stays and loses just the deleted blog's id and URL properties, and the confirmation and the final notice say how many notes were kept.
-- **Bulk delete** warns before deleting a post that a note outside the selection also links to, naming that note. The folder-delete prompt already excluded such posts; the on-demand command did not.
-- The bulk-delete checklist is listed latest first, by publication time and else by the note's creation time, and each row shows its date and the post's public URL (or slug), so a duplicate made a moment ago is at the top and look-alike titles can be told apart.
-- **Update note from textpack** no longer depends on the note still publishing under the pack's slug, and never changes a note's slug. A note whose writer chose a different address than the pack proposed was not found, so the pack was imported as a second note and sync created a second post; had it been found, the update would have replaced the slug and moved the live URL. A note now keeps its slug. Imports and updates record the pack's own slug as `source_slug`, which later packs match first, and the modal lists every note in a blog folder below the matches so a note imported by an earlier version can be chosen by hand. Nothing is preselected when no note matches.
-- Connection tests now prove the configured credential with a read-only authenticated Admin posts request before reporting success; Ghost's public `/admin/site/` response can no longer make a revoked or unknown key look valid.
-- Responsive Ghost tables now use a root-font-independent 640px minimum and keep compact identifiers and measurements on one line, while prose cells remain free to wrap.
-- GitHub-flavored Markdown tables now publish as responsive, theme-independent Ghost HTML cards and round-trip back to Markdown without collapsing into a paragraph. Alignment, escaped pipes, inline formatting, safe links, readable cell spacing, and malformed-table fallback are preserved.
-- Wrapped unordered and ordered list items now retain both indented and CommonMark lazy continuation lines instead of splitting them into stray paragraphs.
-- Markdown links now keep their URLs opaque while parsing inline emphasis, so underscores in YouTube ids and other URLs cannot corrupt Ghost headings or leak internal conversion markers.
+
+## [0.17.3] - 2026-09-19
 
 ### Added
 - **Update from GitHub** now loads the build it installs. After the three files are swapped in, it unloads and loads Omnighost through Obsidian's plugin manager, the same path as switching the plugin off and on in settings, and first gives Obsidian's cached manifest the installed version so settings stops showing the old number. That manager is undocumented, so it is probed rather than assumed: where it is missing, or if the reload fails, the updater says to switch the plugin off and on or restart. It never reloads while a sync or a bulk delete is running, because unloading mid-request could leave a post written on Ghost with its id not yet written back to the note.
+
+## [0.17.2] - 2026-09-19
+
+### Fixed
+- **Bulk delete** no longer removes a note that is still published elsewhere. The checklist has one row per note and blog, and deleting one blog's post used to trash or archive the whole note, leaving its posts on other blogs with nothing in the vault to update them from; choosing a single blog in the first step did the same without showing the other posts at all. A note is now removed only when none of its posts is left on any blog. Otherwise it stays and loses just the deleted blog's id and URL properties, and the confirmation and the final notice say how many notes were kept.
+- **Bulk delete** warns before deleting a post that a note outside the selection also links to, naming that note. The folder-delete prompt already excluded such posts; the on-demand command did not.
+- The bulk-delete checklist is listed latest first, by publication time and else by the note's creation time, and each row shows its date and the post's public URL (or slug), so a duplicate made a moment ago is at the top and look-alike titles can be told apart.
+
+## [0.17.1] - 2026-09-19
+
+### Fixed
+- **Update note from textpack** no longer depends on the note still publishing under the pack's slug, and never changes a note's slug. A note whose writer chose a different address than the pack proposed was not found, so the pack was imported as a second note and sync created a second post; had it been found, the update would have replaced the slug and moved the live URL. A note now keeps its slug. Imports and updates record the pack's own slug as `source_slug`, which later packs match first, and the modal lists every note in a blog folder below the matches so a note imported by an earlier version can be chosen by hand. Nothing is preselected when no note matches.
+
+## [0.17.0] - 2026-09-18
+
+### Added
 - **Update note from textpack** replaces a note's body, title, tags, excerpt, images and source version from a newer pack of the same post, and keeps everything else the note holds: its blog list, per-blog Ghost ids and URLs, publish and schedule switches, access, cover and provenance display settings, and any properties added by hand. The next sync therefore updates the same post on every blog instead of creating a second note that knows only the pack's one blog. Images stay in the folder the note already uses, and images the new pack dropped are moved to the trash. An updated note is fingerprinted again, so an untouched one still publishes with the pack's Git version. The modal says whether the target is unchanged since its last import, was edited since, or never came from a textpack.
+  (Introduced here; 0.17.1 corrected which notes it matches and stopped it changing a note's slug.)
 - A `.textpack` saved into the vault whose slug an existing note already holds now asks whether to update that note or import a copy, instead of silently creating a timestamped duplicate.
+
+### Fixed
+- Connection tests now prove the configured credential with a read-only authenticated Admin posts request before reporting success; Ghost's public `/admin/site/` response can no longer make a revoked or unknown key look valid.
+
+## [0.16.6] - 2026-08-19
+
+### Fixed
+- Responsive Ghost tables now use a root-font-independent 640px minimum and keep compact identifiers and measurements on one line, while prose cells remain free to wrap.
+
+## [0.16.5] - 2026-08-19
+
+### Fixed
+- GitHub-flavored Markdown tables now publish as responsive, theme-independent Ghost HTML cards and round-trip back to Markdown without collapsing into a paragraph. Alignment, escaped pipes, inline formatting, safe links, readable cell spacing, and malformed-table fallback are preserved.
+- Wrapped unordered and ordered list items now retain both indented and CommonMark lazy continuation lines instead of splitting them into stray paragraphs.
+
+## [0.16.3] - 2026-08-10
+
+### Added
 - Publication provenance records a canonical SHA-256 and optional source-note Git commit in hidden per-post Ghost metadata.
 - A three-mode setting can show the version and Omnighost credit, show only the linked credit, or keep the entire provenance block hidden.
 - The Ghost properties modal now offers an explicit **Override blog settings authority imprint** toggle. Turning it on reveals per-post provenance visibility, an optional single/double divider, normal/small/tiny text, and italics; the override is off by default.
@@ -35,6 +74,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stored publication hashes provide the optional fast no-op path. An enabled-by-default direct-verification toggle keeps the managed-field comparison as protection against edits made directly in Ghost.
 - Textpack source inheritance survives publishing controls and Ghost id/URL write-backs, but authorial metadata, body, or imported-asset edits invalidate it and fall back to normal note versioning.
 - Provenance display choices are operational metadata, so changing only their visibility or styling preserves an untouched textpack's inherited Git version.
+
+### Fixed
+- Markdown links now keep their URLs opaque while parsing inline emphasis, so underscores in YouTube ids and other URLs cannot corrupt Ghost headings or leak internal conversion markers.
+
+> Releases 0.11.0 through 0.16.2 were published without changelog entries.
+> Their changes are recorded in the Git history and in the release notes on
+> GitHub; nothing was reconstructed here after the fact.
 
 ## [0.10.0] - 2026-06-30 — Márquez
 
